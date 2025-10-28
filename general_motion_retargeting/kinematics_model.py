@@ -66,12 +66,18 @@ class Joint:
     
     
 class KinematicsModel:
-    def __init__(self, file_path, device):
+    def __init__(self, file_path, device, extend_hand=False, extend_head=False):
         self._device = device
         self._file_path = file_path
+        self._extend_hand = extend_hand
+        self._extend_head = extend_head
         
         self._build_kinematics_model()
         self._set_dof_indices()
+        
+        # Extend with hand and head links if requested
+        if self._extend_hand or self._extend_head:
+            self._extend_links()
         
     def _build_kinematics_model(self):
         self._body_names = []
@@ -168,6 +174,81 @@ class KinematicsModel:
             if joint.dof_dim > 0:
                 joint.set_dof_idx(curr_dof_idx)
                 curr_dof_idx += joint.dof_dim
+    
+    def _extend_links(self):
+        """Extend kinematics model with hand and head links"""
+        self._remove_idx = 0
+        base_num_joints = len(self._body_names)
+        
+        if self._extend_hand:
+            # Find left and right elbow indices
+            left_elbow_idx = None
+            right_elbow_idx = None
+            
+            for i, name in enumerate(self._body_names):
+                name_lower = name.lower()
+                if 'left' in name_lower and ('elbow' in name_lower or 'forearm' in name_lower):
+                    left_elbow_idx = i
+                elif 'right' in name_lower and ('elbow' in name_lower or 'forearm' in name_lower):
+                    right_elbow_idx = i
+            
+            # Fallback: use heuristic indices if not found by name
+            if left_elbow_idx is None:
+                # Assume left arm is before right arm and each has elbow around index 18-19
+                if base_num_joints > 18:
+                    left_elbow_idx = 18
+            if right_elbow_idx is None:
+                if base_num_joints > 22:
+                    right_elbow_idx = 22
+            
+            if left_elbow_idx is None or right_elbow_idx is None:
+                print(f"Warning: Could not find elbow indices, using defaults: {left_elbow_idx}, {right_elbow_idx}")
+            
+            # Add left hand link
+            wrist_length = 0.3
+            self._body_names.append("left_hand_link")
+            self._parent_indices = torch.cat((self._parent_indices, torch.tensor([left_elbow_idx], device=self._device)))
+            self._local_translation = torch.cat((self._local_translation, torch.tensor([[wrist_length, 0, 0]], device=self._device)))
+            self._local_rotation = torch.cat((self._local_rotation, torch.tensor([[1, 0, 0, 0]], device=self._device)))
+            self._joints.append(Joint(name="left_hand_link", dof_dim=0, axis=None))
+            self._dof_size.append(0)
+            self._remove_idx += 1
+            
+            # Add right hand link
+            self._body_names.append("right_hand_link")
+            self._parent_indices = torch.cat((self._parent_indices, torch.tensor([right_elbow_idx], device=self._device)))
+            self._local_translation = torch.cat((self._local_translation, torch.tensor([[wrist_length, 0, 0]], device=self._device)))
+            self._local_rotation = torch.cat((self._local_rotation, torch.tensor([[1, 0, 0, 0]], device=self._device)))
+            self._joints.append(Joint(name="right_hand_link", dof_dim=0, axis=None))
+            self._dof_size.append(0)
+            self._remove_idx += 1
+        
+        if self._extend_head:
+            # Find torso index
+            torso_idx = None
+            for i, name in enumerate(self._body_names):
+                name_lower = name.lower()
+                if 'torso' in name_lower or 'spine' in name_lower or 'body' in name_lower:
+                    if 'pelvis' not in name_lower and 'head' not in name_lower:
+                        torso_idx = i
+                        break
+            
+            # Fallback: use index 15 (common torso index)
+            if torso_idx is None:
+                if base_num_joints > 15:
+                    torso_idx = 15
+                else:
+                    torso_idx = 0
+            
+            # Add head link
+            head_length = 0.4
+            self._body_names.append("head_link")
+            self._parent_indices = torch.cat((self._parent_indices, torch.tensor([torso_idx], device=self._device)))
+            self._local_translation = torch.cat((self._local_translation, torch.tensor([[0, 0, head_length]], device=self._device)))
+            self._local_rotation = torch.cat((self._local_rotation, torch.tensor([[1, 0, 0, 0]], device=self._device)))
+            self._joints.append(Joint(name="head_link", dof_dim=0, axis=None))
+            self._dof_size.append(0)
+            self._remove_idx += 1
                 
     def dof_to_rot(self, dof):
         rot_shape = list(dof.shape[:-1]) + [self.num_joint-1, 4]
@@ -223,7 +304,58 @@ class KinematicsModel:
             j_rot = joint_rot[..., j-1, :]
             local_trans = self._local_translation[j] if fitted_shape is None else self._local_translation[j] * fitted_shape[j]
             local_rot = self._local_rotation[j]
-            parent_idx = self._parent_indices[j]
+            parent_idx = self._parent_indices[j].item()
+            
+            parent_pos = body_pos[parent_idx]
+            parent_rot = body_rot[parent_idx]
+            
+            local_trans_broadcast = torch.broadcast_to(local_trans, parent_pos.shape)
+            local_rot_broadcast = torch.broadcast_to(local_rot, parent_rot.shape)
+            
+            world_trans = torch_utils.quat_rotate(parent_rot, local_trans_broadcast)
+            
+            curr_pos = parent_pos + world_trans
+            curr_rot = torch_utils.quat_mul(local_rot_broadcast, j_rot)
+            curr_rot = torch_utils.quat_mul(parent_rot, curr_rot)
+            
+            body_pos[j] = curr_pos
+            body_rot[j] = curr_rot
+        
+        body_pos = torch.stack(body_pos, dim=-2)
+        body_rot = torch.stack(body_rot, dim=-2)
+        
+        # If extended links were added and not requested, remove them
+        # if (self._extend_hand or self._extend_head) and hasattr(self, '_remove_idx') and self._remove_idx > 0:
+        #     body_pos = body_pos[..., :-self._remove_idx, :]
+        #     body_rot = body_rot[..., :-self._remove_idx, :]
+        
+        return body_pos, body_rot
+    
+    def forward_kinematics_extend(self, root_pos, root_rot, dof_pos, fitted_shape=None):
+        """
+        Perform forward kinematics with extended links (hand, head) included
+        Args:
+            root_pos: root position [..., 3]
+            root_rot: root rotation as quaternion [..., 4]
+            dof_pos: joint positions [..., num_dof]
+            fitted_shape: optional shape scaling factor for each joint
+        Returns:
+            body_pos: body positions [..., num_joint, 3] with extended links
+            body_rot: body rotations [..., num_joint, 4] with extended links
+        """
+        joint_rot = self.dof_to_rot(dof_pos)
+        
+        body_pos = [None] * self.num_joint
+        body_rot = [None] * self.num_joint
+        
+        body_pos[0] = root_pos
+        body_rot[0] = root_rot
+        
+        for j in range(1, self.num_joint):
+            j_rot = joint_rot[..., j-1, :]
+            local_trans = self._local_translation[j] if fitted_shape is None else self._local_translation[j] * fitted_shape[j]
+            local_rot = self._local_rotation[j]
+            parent_idx = self._parent_indices[j].item()
             
             parent_pos = body_pos[parent_idx]
             parent_rot = body_rot[parent_idx]

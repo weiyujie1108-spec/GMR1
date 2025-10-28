@@ -10,6 +10,10 @@ import numpy as np
 import general_motion_retargeting.utils.lafan_vendor.utils as utils
 from scipy.spatial.transform import Rotation as R
 import torch
+import asyncio
+import aiohttp
+from aiohttp import web
+import json
 
 def get_event_type_name(event_type_value):
     """
@@ -31,6 +35,122 @@ def get_event_type_name(event_type_value):
         MCPEventType.AliceMarkerUpdated: 'AliceMarkerUpdated',
     }
     return event_type_map.get(event_type_value, f'Unknown({event_type_value})')
+
+robot_local_body_pos = np.zeros([12, 3])
+robot_timestamp = 0.0
+
+async def get_robot_data(request):
+    """
+    HTTP GET处理器
+    """
+    global robot_local_body_pos, robot_root_pos, robot_timestamp
+    data = {
+        "local_body_pos": robot_local_body_pos.tolist(),
+        "root_pos": robot_root_pos.tolist(),
+        "timestamp": robot_timestamp
+    }
+    return web.json_response(data)
+
+def update_robot_data(local_body_pos, root_pos):
+    global robot_local_body_pos, robot_root_pos, robot_timestamp
+    
+    # 转换torch tensor为nrime array
+    if isinstance(local_body_pos, torch.Tensor):
+        local_body_pos = local_body_pos.cpu().numpy()
+    if isinstance(root_pos, torch.Tensor):
+        root_pos = root_pos.cpu().numpy()
+    
+    robot_local_body_pos = local_body_pos
+    robot_root_pos = root_pos
+    robot_timestamp = time.time()
+
+class RobotDataServer:
+    """
+    机器人数据Web服务器
+    """
+    
+    def __init__(self, port=8080):
+        self.port = port
+        self.app = None
+        self.runner = None
+        self.site = None
+        self.active_websockets = set()  # 存储所有活跃的WebSocket连接
+    
+    async def websocket_handler(self, request):
+        """
+        WebSocket处理器 - 实时推送模式
+        自动向所有连接的客户端推送最新的机器人数据
+        """
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        
+        # 添加到活跃连接列表
+        self.active_websockets.add(ws)
+        print(f'WebSocket连接建立，当前连接数: {len(self.active_websockets)}')
+        
+        try:
+            # 循环推送数据
+            while True:
+                await asyncio.sleep(0.01)  # 控制推送频率，约100Hz
+                
+                # 读取全局变量
+                global robot_local_body_pos, robot_root_pos, robot_timestamp
+                data = {
+                    "local_body_pos": robot_local_body_pos.tolist(),
+                    "root_pos": robot_root_pos.tolist(),
+                    "timestamp": robot_timestamp
+                }
+                
+                # 推送数据
+                try:
+                    await ws.send_json(data)
+                except Exception as e:
+                    # 如果发送失败，说明连接已断开
+                    print(f'WebSocket推送失败: {e}')
+                    break
+                    
+        except Exception as e:
+            print(f'WebSocket错误: {e}')
+        finally:
+            # 从活跃连接列表移除
+            self.active_websockets.discard(ws)
+            print(f'WebSocket连接关闭，当前连接数: {len(self.active_websockets)}')
+        
+        return ws
+    
+    async def start_server(self):
+        """
+        启动Web服务器
+        """
+        self.app = web.Application()
+        
+        # 添加路由
+        self.app.router.add_route('GET', '/get_robot_data', get_robot_data)
+        self.app.router.add_route('GET', '/ws', self.websocket_handler)
+        
+        # 启动服务器
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+        self.site = web.TCPSite(self.runner, '0.0.0.0', self.port)
+        await self.site.start()
+        print(f'机器人数据服务器已启动: http://localhost:{self.port}')
+        print(f'  - HTTP GET: http://localhost:{self.port}/get_robot_data')
+        print(f'  - WebSocket: ws://localhost:{self.port}/ws')
+    
+    def start(self):
+        """
+        在新线程中启动Web服务器
+        """
+        def run_server():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.start_server())
+            loop.run_forever()
+        
+        thread = threading.Thread(target=run_server, daemon=True)
+        thread.start()
+        # 等待服务器启动
+        time.sleep(0.5)
 
 
 class MocapStream:
@@ -178,6 +298,10 @@ def main(args):
     print("On OptiTrack computer: Disable Windows Firewall")
     print("On this computer: sudo ufw disable")
 
+    # 初始化并启动Web服务器
+    web_server = RobotDataServer(port=8080)
+    web_server.start()
+
     mocap_stream = MocapStream()
 
     # start a thread to client.run()
@@ -199,7 +323,7 @@ def main(args):
     viewer = RobotMotionViewer(robot_type=args.robot)
     # Initialize the forward kinematics
     device = "cuda:0"
-    kinematics_model = KinematicsModel(retarget.xml_file, device=device)
+    kinematics_model = KinematicsModel(retarget.xml_file, device=device, extend_hand=True, extend_head=True)
 
     while True:
         lafan1_data = mocap_stream.get_lafan1_data_from_avatar_data()
@@ -223,17 +347,32 @@ def main(args):
         identity_root_rot[:, -1] = 1.0
         local_body_pos, _ = kinematics_model.forward_kinematics(
                 identity_root_pos, 
-                identity_root_rot, 
+                 torch.from_numpy(root_rot).to(device=device, dtype=torch.float), 
                 torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
             )
+        # 转换torch tensor为numpy array
+        local_body_pos_np = local_body_pos[0].cpu().numpy() if isinstance(local_body_pos, torch.Tensor) else local_body_pos[0]
+        # ["Pelvis", "L_Knee", "L_Ankle", "R_Knee", "R_Ankle", "L_Shoulder", "L_Elbow", "R_Shoulder", "R_Elbow", "L_Hand", "R_Hand", "Head"]
+        body_names = kinematics_model.body_names
+        sub_local_body_pos_names = ['pelvis', 'left_knee_link', 'left_ankle_roll_link', 'right_knee_link', 'right_ankle_roll_link', 
+        'left_shoulder_pitch_link',  'left_elbow_link', 'right_shoulder_pitch_link', 'right_elbow_link', 'left_hand_link', 'right_hand_link', 'head_link']
+        sub_local_body_pos_id = [body_names.index(name) for name in sub_local_body_pos_names]
+        sub_local_body_pos = local_body_pos_np[sub_local_body_pos_id]
+        
+        # 更新Web服务器中的机器人数据（调用全局函数）
+        update_robot_data(
+            sub_local_body_pos,
+            root_pos,
+        )
+        
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--server_ip", type=str, default="192.168.200.160")
-    parser.add_argument("--client_ip", type=str, default="192.168.200.117")
-    parser.add_argument("--use_multicast", type=bool, default=False)
-    # parser.add_argument("--robot", type=str, default="unitree_g1")
+    # parser.add_argument("--server_ip", type=str, default="192.168.200.160")
+    # parser.add_argument("--client_ip", type=str, default="192.168.200.117")
+    # parser.add_argument("--use_multicast", type=bool, default=False)
+    # # parser.add_argument("--robot", type=str, default="unitree_g1")
     parser.add_argument("--robot", type=str, default="unitree_g1_fixed_wrist")
     args = parser.parse_args()
     main(args)
