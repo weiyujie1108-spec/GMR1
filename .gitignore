@@ -22,7 +22,7 @@ coverage.xml
 .hypothesis
 
 # IDEs
-.vscode/
+# .vscode/
 .idea/
 *.swp
 *.swo

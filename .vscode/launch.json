@@ -1,0 +1,61 @@
+// python scripts/bvh_to_robot_dataset.py --src_folder data/lafan --tgt_folder retargeted_data/lafan/ --robot unitree_g1
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "smplx_to_robot.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/smplx_to_robot.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--smplx_file", "data/ACCAD/Male2Running_c3d/C1_-_stand_to_run_stageii.npz",
+                // "--robot", "unitree_g1",
+                "--robot", "unitree_g1_fixed_wrist",
+                "--save_path", "retargeted_data/test.pkl",
+                "--rate_limit"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
+        {
+            "name": "smplx_to_robot_dataset.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/smplx_to_robot_dataset.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                // "--src_folder", "data/AMASS/ACCAD/Male1Running_c3d",
+                // "--tgt_folder", "retargeted_data/AMASS/ACCAD/Male1Running_c3d",
+                "--src_folder", "data/AMASS",
+                "--tgt_folder", "retargeted_data",
+                // "--robot", "unitree_g1",
+                "--robot", "unitree_g1_fixed_wrist",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
+        {
+            "name": "select_motions.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/select_motions.py",
+            "cwd": "${workspaceFolder}", 
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "mocap_to_robot.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/mocap_to_robot.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                // "--robot", "unitree_g1",
+                "--robot", "unitree_g1_fixed_wrist",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
+    ]
+}
