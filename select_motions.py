@@ -10,10 +10,10 @@ import joblib
 # all_data = joblib.load('resources/motions/g1/split_motions_60s_all.pkl')
 # all_data = joblib.load('resources/motions/g1/merged_sampled_static_poses_0822.pkl')
 # motion_file =  f"resources/motions/g1/lafan_g1_all_wo_jump_fall.pkl"
-motion_file =  f"resources/motions/g1/merged_sampled_static_poses_0822.pkl"
+motion_file =  f"/home/yixuan/yixuan/g1-23dof/legged_gym/resources/motions/g1/demo_10.pkl"
 # motion_file =  f"resources/motions/g1/merged_sampled_static_poses_0818.pkl"
 # motion_file = f"/Users/yixuanpan/g1_test_code/Humanoid-private-g1/legged_gym/resources/motions/g1/merged_sampled_static_poses_0822.pkl"
-# all_data = joblib.load(motion_file)
+all_data = joblib.load(motion_file)
 # all_data = joblib.load('resources/motions/g1/amass_all_free_waist.pkl')
 # all_data = joblib.load('resources/motions/g1/sample_single_foot_static_constant_2048_3_z_bias.pkl')
 # all_data = joblib.load('resources/motions/g1/mai_demo.pkl')
@@ -75,11 +75,11 @@ select_motions = ['single_stand_pose_left_062','single_stand_pose_left_040','sin
 # demo_data_2 = joblib.load('resources/motions/g1/g1_run1_subject5_153_253.pkl')
 # demo_data_2 = joblib.load('resources/motions/g1/g1_run1_subject5_153_337.pkl')
 # demo_data_1 = joblib.load('resources/motions/g1/ye_wen_squat_hip_yaw_bias_large_v4.pkl')
-demo_data_1 = joblib.load('/home/yixuan/yixuan/GMR/retargeted_data/test.pkl')
+demo_data_1 = joblib.load('retargeted_data/AMASS/ACCAD/Male2Running_c3d/C3_-_run_stageii.pkl')
 
 # demo_data_3 = joblib.load('resources/motions/g1/0-gvhmr_yewen3.pkl')
-# demo_data_2 = joblib.load('/home/chonghao/yixuan/g1-tracking/MotionGen/motions/g1/ip_man.pkl')
-# demo_data_3 = joblib.load('resources/motions/g1/Charleston_dance.pkl')
+demo_data_2 = joblib.load('/home/yixuan/yixuan/g1-23dof/legged_gym/resources/motions/g1/lafan_g1_all_wo_jump_fall.pkl')
+demo_data_3 = joblib.load('/home/yixuan/yixuan/g1-23dof/legged_gym/resources/motions/g1/g1_23dof_amass_3k.pkl')
 # demo_data_3 = joblib.load('/home/yixuan/yixuan/unified-deploy/legged_gym/resources/motions/g1/demo_10.pkl')
 data_dump = {}
 # for motion in select_motions:

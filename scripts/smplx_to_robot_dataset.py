@@ -21,9 +21,42 @@ import gc
 import time
 import psutil
 import tracemalloc
+import joblib
 
-
-def check_memory(threshold_gb=30):  # adjust based on your available memory
+G1_ROTATION_AXIS = torch.tensor([[
+    [0, 1, 0], # l_hip_pitch 
+    [1, 0, 0], # l_hip_roll
+    [0, 0, 1], # l_hip_yaw
+    
+    [0, 1, 0], # l_knee
+    [0, 1, 0], # l_ankle_pitch
+    [1, 0, 0], # l_ankle_roll
+    
+    [0, 1, 0], # r_hip_pitch
+    [1, 0, 0], # r_hip_roll
+    [0, 0, 1], # r_hip_yaw
+    
+    [0, 1, 0], # r_knee
+    [0, 1, 0], # r_ankle_pitch
+    [1, 0, 0], # r_ankle_roll
+    
+    [0, 0, 1], # waist_yaw_joint
+    [1, 0, 0], # waist_roll_joint
+    [0, 1, 0], # waist_pitch_joint
+   
+    [0, 1, 0], # l_shoulder_pitch
+    [1, 0, 0], # l_shoulder_roll
+    [0, 0, 1], # l_shoulder_yaw
+    
+    [0, 1, 0], # l_elbow
+    
+    [0, 1, 0], # r_shoulder_pitch
+    [1, 0, 0], # r_shoulder_roll
+    [0, 0, 1], # r_shoulder_yaw
+    
+    [0, 1, 0], # r_elbow
+    ]])
+def check_memory(threshold_gb=10):  # adjust based on your available memory
     mem = psutil.virtual_memory()
     used_memory_gb = (mem.total - mem.available) / (1024 ** 3)
     available_memory_gb = mem.available / (1024 ** 3)
@@ -90,8 +123,6 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
 
     log_memory("After retargeting")
     
-    device = "cuda:0"
-    kinematics_model = KinematicsModel(retargeter.xml_file, device=device)
 
     try:
         root_pos = qpos_list[:, :3]
@@ -103,17 +134,22 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
     dof_pos = qpos_list[:, 7:]
     num_frames = root_pos.shape[0]
 
-    fk_root_pos = torch.zeros((num_frames, 3), device=device)
-    fk_root_rot = torch.zeros((num_frames, 4), device=device)
-    fk_root_rot[:, -1] = 1.0
+    
+    # ********************** forward kinematics **********************
+    device = "cuda:0"
+    kinematics_model = KinematicsModel(retargeter.xml_file, device=device, extend_hand=True, extend_head=True)
 
-    local_body_pos, _ = kinematics_model.forward_kinematics(
-        fk_root_pos, fk_root_rot, torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
-    )
+    # fk_root_pos = torch.zeros((num_frames, 3), device=device)
+    # fk_root_rot = torch.zeros((num_frames, 4), device=device)
+    # fk_root_rot[:, -1] = 1.0
 
-    log_memory("After forward kinematics")
+    # local_body_pos, _ = kinematics_model.forward_kinematics(
+    #     fk_root_pos, fk_root_rot, torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
+    # )
 
-    body_names = kinematics_model.body_names
+    # log_memory("After forward kinematics")
+
+    # body_names = kinematics_model.body_names
     
     HEIGHT_ADJUST = True
     if HEIGHT_ADJUST:
@@ -129,21 +165,42 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
     if ROOT_ORIGIN_OFFSET:
         # offset using the first frame
         root_pos[:, :2] -= root_pos[0, :2]
-        
-        
+    
+    rot_vec_all = []
+    for frame_idx in range(num_frames):
+        rotation = R.from_quat(root_rot[frame_idx])
+        rotvec = rotation.as_rotvec()
+        rotvec = torch.from_numpy(rotvec)
+        rot_vec_all.append(rotvec)
+    device = "cpu"
+    rot_vec_all = torch.cat(rot_vec_all, dim=0).view(-1, 3).to(device=device, dtype=torch.float)
+    dof_pos_all = torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
+    pose_aa = torch.cat([rot_vec_all[None, :, None], G1_ROTATION_AXIS * dof_pos_all[None,:,:,None], torch.zeros((1, num_frames, 3, 3),device=device)], axis = 2)
+            
+
     motion_data = {
-        "fps": aligned_fps,
-        "root_pos": root_pos,
+        "root_trans_offset": root_pos,
+        "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+        "dof": dof_pos,
         "root_rot": root_rot,
-        "dof_pos": dof_pos,
-        "local_body_pos": local_body_pos.detach().cpu().numpy(),
-        "link_body_list": body_names,
+        "fps": 30,
     }
+    # motion_data = {
+    #     "fps": aligned_fps,
+    #     "root_pos": root_pos,
+    #     "root_rot": root_rot,
+    #     "dof_pos": dof_pos,
+    #     "local_body_pos": local_body_pos.detach().cpu().numpy(),
+    #     "link_body_list": body_names,
+    # }
 
-
+    data_dump = {}
+    motion_name = smplx_file_path.split("/")[-1].split(".")[0]
+    data_dump[motion_name] = motion_data
     os.makedirs(os.path.dirname(tgt_file_path), exist_ok=True)
     with open(tgt_file_path, "wb") as f:
-        pickle.dump(motion_data, f)
+        # pickle.dump(motion_data, f)
+        joblib.dump(data_dump, tgt_file_path)
         
     # Progress print based on tgt_folder
     done = 0
@@ -179,7 +236,7 @@ def main():
                         )
     
     parser.add_argument("--override", default=False, action="store_true")
-    parser.add_argument("--num_cpus", default=24, type=int)
+    parser.add_argument("--num_cpus", default=12, type=int)
     args = parser.parse_args()
     
     # print the total number of cpus and gpus
