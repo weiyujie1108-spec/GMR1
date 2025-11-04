@@ -33,8 +33,8 @@ class RobotDataClient:
             with self.data_lock:
                 self.latest_data = data
             
-            # 打印接收信息
-            print(f"[{time.time():.3f}] 收到数据 - 时间戳: {data['timestamp']:.3f}")
+            # 可选：打印接收信息（注释掉以减少打印开销）
+            # print(f"[{time.time():.3f}] 收到数据 - 时间戳: {data['timestamp']:.3f}")
             
         except Exception as e:
             print(f"解析数据错误: {e}")
@@ -103,17 +103,28 @@ def main():
             data = client.get_latest_data()
             
             if data is not None:
-                # 在这里可以使用接收到的数据进行机器人控制
-                print("\n=== 使用数据进行机器人控制 ===")
-                print(f"DOF数量: {len(data['dof_pos'])}")
-                print(f"根节点位置: {data['root_pos']}")
-                print(f"根节点旋转: {data['root_rot']}")
+                # 获取接收到的数据
+                # 数据格式: {
+                #     "local_body_pos": [[x, y, z], ...],  # 12个身体部位的局部位置
+                #     "body_vel": [[vx, vy, vz], ...],      # 12个身体部位的速度
+                #     "timestamp": 123456789.123            # 时间戳
+                # }
+                
+                local_body_pos = np.array(data['local_body_pos'])  # shape: [12, 3]
+                body_vel = np.array(data['body_vel'])              # shape: [12, 3]
+                timestamp = data['timestamp']
+                
+                # 打印数据（可选）
+                print(f"[{time.time():.3f}] 收到数据 - 时间戳: {timestamp:.3f}")
+                print(f"  身体位置: {local_body_pos[0]}")  # 打印第一个部位的位置
+                print(f"  身体速度: {body_vel[0]}")        # 打印第一个部位的速度
                 
                 # TODO: 在这里添加您的机器人控制代码
-                # 例如: robot.set_joint_positions(data['dof_pos'])
-                #       robot.set_root_pose(data['root_pos'], data['root_rot'])
+                # 例如:
+                # robot.set_body_positions(local_body_pos)
+                # robot.set_body_velocities(body_vel)
             
-            time.sleep(0.01)  # 控制循环频率
+            time.sleep(0.01)  # 控制循环频率（100Hz）
             
     except KeyboardInterrupt:
         print("\n正在关闭客户端...")

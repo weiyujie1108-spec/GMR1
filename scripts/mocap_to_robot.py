@@ -14,6 +14,7 @@ import asyncio
 import aiohttp
 from aiohttp import web
 import json
+import scipy.ndimage.filters as filters
 
 def get_event_type_name(event_type_value):
     """
@@ -43,25 +44,25 @@ async def get_robot_data(request):
     """
     HTTP GET处理器
     """
-    global robot_local_body_pos, robot_root_pos, robot_timestamp
+    global robot_local_body_pos, robot_body_vel, robot_timestamp
     data = {
         "local_body_pos": robot_local_body_pos.tolist(),
-        "root_pos": robot_root_pos.tolist(),
+        "body_vel": robot_body_vel.tolist(),
         "timestamp": robot_timestamp
     }
     return web.json_response(data)
 
-def update_robot_data(local_body_pos, root_pos):
-    global robot_local_body_pos, robot_root_pos, robot_timestamp
+def update_robot_data(local_body_pos, ref_body_vel):
+    global robot_local_body_pos, robot_body_vel, robot_timestamp
     
     # 转换torch tensor为nrime array
     if isinstance(local_body_pos, torch.Tensor):
         local_body_pos = local_body_pos.cpu().numpy()
-    if isinstance(root_pos, torch.Tensor):
-        root_pos = root_pos.cpu().numpy()
+    if isinstance(ref_body_vel, torch.Tensor):
+        ref_body_vel = ref_body_vel.cpu().numpy()
     
     robot_local_body_pos = local_body_pos
-    robot_root_pos = root_pos
+    robot_body_vel = ref_body_vel
     robot_timestamp = time.time()
 
 class RobotDataServer:
@@ -94,10 +95,10 @@ class RobotDataServer:
                 await asyncio.sleep(0.01)  # 控制推送频率，约100Hz
                 
                 # 读取全局变量
-                global robot_local_body_pos, robot_root_pos, robot_timestamp
+                global robot_local_body_pos, robot_body_vel, robot_timestamp
                 data = {
                     "local_body_pos": robot_local_body_pos.tolist(),
-                    "root_pos": robot_root_pos.tolist(),
+                    "body_vel": robot_body_vel.tolist(),
                     "timestamp": robot_timestamp
                 }
                 
@@ -292,6 +293,16 @@ class MocapStream:
             self.app.close()
             print("Mocap application closed")
 
+def compute_velocity(p, time_delta, guassian_filter=True):
+    velocity = np.gradient(p.numpy(), axis=-3) / time_delta
+    if guassian_filter:
+        velocity = torch.from_numpy(filters.gaussian_filter1d(velocity, 2, axis=-3, mode="nearest")).to(p)
+    else:
+        velocity = torch.from_numpy(velocity).to(p)
+
+    return velocity
+
+
 def main(args):
     # Check if firewall is disabled on this machine
     print("Make sure to disable firewall on both machines:")
@@ -320,21 +331,58 @@ def main(args):
             tgt_robot=args.robot,
             actual_human_height=1.75,
         )
-    viewer = RobotMotionViewer(robot_type=args.robot)
+
+    # viewer = RobotMotionViewer(robot_type=args.robot)
+
+    # env = RobotMotionViewer(robot_type=robot_type,
+    #                     motion_fps=60.,
+    #                     camera_follow=False,
+    #                     record_video=args.record_video, video_path=args.video_path)
+
     # Initialize the forward kinematics
     device = "cuda:0"
     kinematics_model = KinematicsModel(retarget.xml_file, device=device, extend_hand=True, extend_head=True)
 
+    # 初始化统计变量（局部变量）
+    update_count = 0
+    update_start_time = time.time()
+    last_update_time = update_start_time
+    
+    # 用于统计各部分耗时
+    time_get_data = []
+    time_retarget = []
+    time_forward_kinematics = []
+    time_update_data = []
+    # ["Pelvis", "L_Knee", "L_Ankle", "R_Knee", "R_Ankle", "L_Shoulder", "L_Elbow", "R_Shoulder", "R_Elbow", "L_Hand", "R_Hand", "Head"]
+    body_names = kinematics_model.body_names
+    sub_local_body_pos_names = ['pelvis', 'left_knee_link', 'left_ankle_roll_link', 'right_knee_link', 'right_ankle_roll_link', 
+    'left_shoulder_pitch_link',  'left_elbow_link', 'right_shoulder_pitch_link', 'right_elbow_link', 'left_hand_link', 'right_hand_link', 'head_link']
+    sub_local_body_pos_id = [body_names.index(name) for name in sub_local_body_pos_names]
+    
+    # 初始化用于速度计算的变量
+    prev_global_body_pos = None
+    prev_get_data_time = None
+    
     while True:
+        # 1. 获取Mocap数据
+        current_get_data_time = time.time()
+        t0 = time.time()
         lafan1_data = mocap_stream.get_lafan1_data_from_avatar_data()
-        print(lafan1_data)
+        t1 = time.time()
+        time_get_data.append((t1 - t0) * 1000)  # 转换为毫秒
+        
+        # 2. 运动重定向
+        t0 = time.time()
         qpos = retarget.retarget(lafan1_data)
-        viewer.step(
-            root_pos=qpos[:3],
-            root_rot=qpos[3:7],
-            dof_pos=qpos[7:],
-            rate_limit=False,
-        )
+        t1 = time.time()
+        time_retarget.append((t1 - t0) * 1000)
+        
+        # viewer.step(
+        #     root_pos=qpos[:3],
+        #     root_rot=qpos[3:7],
+        #     dof_pos=qpos[7:],
+        #     rate_limit=False,
+        # )
         qpos_list = []
         qpos_list.append(qpos.copy())
         qpos_list = np.array(qpos_list)
@@ -345,25 +393,112 @@ def main(args):
         identity_root_pos = torch.zeros((1, 3), device=device)
         identity_root_rot = torch.zeros((1, 4), device=device)
         identity_root_rot[:, -1] = 1.0
+        
+        # 3. 前向运动学计算
+        t0 = time.time()
         local_body_pos, _ = kinematics_model.forward_kinematics(
                 identity_root_pos, 
                  torch.from_numpy(root_rot).to(device=device, dtype=torch.float), 
                 torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
             )
-        # 转换torch tensor为numpy array
         local_body_pos_np = local_body_pos[0].cpu().numpy() if isinstance(local_body_pos, torch.Tensor) else local_body_pos[0]
-        # ["Pelvis", "L_Knee", "L_Ankle", "R_Knee", "R_Ankle", "L_Shoulder", "L_Elbow", "R_Shoulder", "R_Elbow", "L_Hand", "R_Hand", "Head"]
-        body_names = kinematics_model.body_names
-        sub_local_body_pos_names = ['pelvis', 'left_knee_link', 'left_ankle_roll_link', 'right_knee_link', 'right_ankle_roll_link', 
-        'left_shoulder_pitch_link',  'left_elbow_link', 'right_shoulder_pitch_link', 'right_elbow_link', 'left_hand_link', 'right_hand_link', 'head_link']
-        sub_local_body_pos_id = [body_names.index(name) for name in sub_local_body_pos_names]
-        sub_local_body_pos = local_body_pos_np[sub_local_body_pos_id]
+        t1 = time.time()
+        time_forward_kinematics.append((t1 - t0) * 1000)
         
-        # 更新Web服务器中的机器人数据（调用全局函数）
+        sub_local_body_pos = local_body_pos_np[sub_local_body_pos_id]
+        global_body_pos = sub_local_body_pos + root_pos
+        
+        # 计算每个关节点的速度
+        if prev_global_body_pos is not None and prev_get_data_time is not None:
+            # 计算调用间隔作为时间差
+            s_dt = current_get_data_time - prev_get_data_time
+            
+            # 将numpy数组转换为torch tensor
+            prev_ref_body_pos_tensor = torch.from_numpy(prev_global_body_pos).to(device=device, dtype=torch.float).cpu()
+            ref_body_tensor = torch.from_numpy(global_body_pos).to(device=device, dtype=torch.float).cpu()
+            
+            # 计算速度: shape [12, 3] -> [1, 2, 12, 3]
+            # 堆叠上一帧和当前帧的位置: [1, 12, 3] + [1, 12, 3] -> [1, 2, 12, 3]
+            stacked_pos = torch.stack([prev_ref_body_pos_tensor[None, ...], ref_body_tensor[None, ...]], dim=1)
+            ref_body_vel = compute_velocity(
+                stacked_pos, 
+                time_delta=s_dt, 
+                guassian_filter=False
+            )[0, 1]  # 提取当前时间点的速度: [12, 3]
+        else:
+            # 第一次调用，速度为零或未定义
+            ref_body_vel = np.zeros_like(sub_local_body_pos)
+        # print(ref_body_vel[0])
+        # 更新上一次的global_body_pos和调用时间
+        prev_global_body_pos = global_body_pos.copy()
+        prev_get_data_time = current_get_data_time
+
+        # 4. 更新机器人数据
+        t0 = time.time()
         update_robot_data(
-            sub_local_body_pos,
-            root_pos,
+            global_body_pos,
+            ref_body_vel,
         )
+        t1 = time.time()
+        time_update_data.append((t1 - t0) * 1000)
+        
+        # 统计更新频率
+        update_count += 1
+        current_time = time.time()
+        
+        if last_update_time is not None:
+            interval = current_time - last_update_time
+            elapsed_time = current_time - update_start_time
+            
+            # 每0.2秒打印一次频率和耗时统计
+            if elapsed_time >= 0.2:
+                update_freq = update_count / elapsed_time
+                avg_interval = elapsed_time / update_count
+                
+                # 计算各部分的平均、最大、最小耗时（使用最近 update_count 次的数据）
+                current_count = update_count  # 保存当前计数
+                
+                if len(time_get_data) >= current_count and current_count > 0:
+                    avg_get_data = np.mean(time_get_data[-current_count:])
+                    max_get_data = np.max(time_get_data[-current_count:])
+                    min_get_data = np.min(time_get_data[-current_count:])
+                else:
+                    avg_get_data = max_get_data = min_get_data = 0
+                    
+                if len(time_retarget) >= current_count and current_count > 0:
+                    avg_retarget = np.mean(time_retarget[-current_count:])
+                    max_retarget = np.max(time_retarget[-current_count:])
+                    min_retarget = np.min(time_retarget[-current_count:])
+                else:
+                    avg_retarget = max_retarget = min_retarget = 0
+                    
+                if len(time_forward_kinematics) >= current_count and current_count > 0:
+                    avg_fk = np.mean(time_forward_kinematics[-current_count:])
+                    max_fk = np.max(time_forward_kinematics[-current_count:])
+                    min_fk = np.min(time_forward_kinematics[-current_count:])
+                else:
+                    avg_fk = max_fk = min_fk = 0
+                    
+                if len(time_update_data) >= current_count and current_count > 0:
+                    avg_update = np.mean(time_update_data[-current_count:])
+                    max_update = np.max(time_update_data[-current_count:])
+                    min_update = np.min(time_update_data[-current_count:])
+                else:
+                    avg_update = max_update = min_update = 0
+                
+                total_time = avg_get_data + avg_retarget + avg_fk + avg_update
+                
+                print(f"\n=== 性能统计 (频率: {update_freq:.2f} Hz, 总耗时: {total_time:.2f} ms) ===")
+                # print(f"1. 获取Mocap数据:    平均 {avg_get_data:.3f} ms  (最大 {max_get_data:.3f}, 最小 {min_get_data:.3f})")
+                # print(f"2. 运动重定向:        平均 {avg_retarget:.3f} ms  (最大 {max_retarget:.3f}, 最小 {min_retarget:.3f})")
+                # print(f"3. 前向运动学计算:    平均 {avg_fk:.3f} ms  (最大 {max_fk:.3f}, 最小 {min_fk:.3f})")
+                # print(f"4. 更新机器人数据:    平均 {avg_update:.3f} ms  (最大 {max_update:.3f}, 最小 {min_update:.3f})")
+                # print(f"   总循环时间:        {avg_interval*1000:.2f} ms")
+                
+                update_count = 0
+                update_start_time = current_time
+        
+        last_update_time = current_time
         
 
 

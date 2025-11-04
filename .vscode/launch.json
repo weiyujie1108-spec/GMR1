@@ -28,7 +28,7 @@
                 // "--src_folder", "data/AMASS/ACCAD/Male1Running_c3d",
                 // "--tgt_folder", "retargeted_data/AMASS/ACCAD/Male1Running_c3d",
                 "--src_folder", "data/AMASS",
-                "--tgt_folder", "retargeted_data",
+                "--tgt_folder", "retargeted_data/AMASS",
                 // "--robot", "unitree_g1",
                 "--robot", "unitree_g1_fixed_wrist",
             ],
