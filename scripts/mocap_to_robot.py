@@ -332,7 +332,7 @@ def main(args):
             actual_human_height=1.75,
         )
 
-    # viewer = RobotMotionViewer(robot_type=args.robot)
+    viewer = RobotMotionViewer(robot_type=args.robot)
 
     # env = RobotMotionViewer(robot_type=robot_type,
     #                     motion_fps=60.,
@@ -377,12 +377,12 @@ def main(args):
         t1 = time.time()
         time_retarget.append((t1 - t0) * 1000)
         
-        # viewer.step(
-        #     root_pos=qpos[:3],
-        #     root_rot=qpos[3:7],
-        #     dof_pos=qpos[7:],
-        #     rate_limit=False,
-        # )
+        viewer.step(
+            root_pos=qpos[:3],
+            root_rot=qpos[3:7],
+            dof_pos=qpos[7:],
+            rate_limit=False,
+        )
         qpos_list = []
         qpos_list.append(qpos.copy())
         qpos_list = np.array(qpos_list)
