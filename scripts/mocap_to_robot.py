@@ -15,6 +15,7 @@ import aiohttp
 from aiohttp import web
 import json
 import scipy.ndimage.filters as filters
+from lpf import ActionFilterButter, ActionFilterExp, ActionFilterButterTorch
 
 def get_event_type_name(event_type_value):
     """
@@ -362,7 +363,16 @@ def main(args):
     # 初始化用于速度计算的变量
     prev_global_body_pos = None
     prev_get_data_time = None
-    
+    pose_filt = False
+    pose_cutfreq = 15
+    if pose_filt:
+        pose_filter = ActionFilterButterTorch(
+        lowcut=np.zeros(12*3),  
+        highcut=np.ones(12*3) * pose_cutfreq,  
+        sampling_rate=30, 
+        num_joints=12*3,
+        device="cpu"
+        )
     while True:
         # 1. 获取Mocap数据
         current_get_data_time = time.time()
@@ -407,7 +417,8 @@ def main(args):
         
         sub_local_body_pos = local_body_pos_np[sub_local_body_pos_id]
         global_body_pos = sub_local_body_pos + root_pos
-        
+        if pose_filt:
+            global_body_pos = np.array(pose_filter.filter(torch.from_numpy(global_body_pos).reshape(12*3)).reshape(12, 3))
         # 计算每个关节点的速度
         if prev_global_body_pos is not None and prev_get_data_time is not None:
             # 计算调用间隔作为时间差

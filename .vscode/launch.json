@@ -64,8 +64,8 @@
             "program": "${workspaceFolder}/scripts/bvh_to_robot_dataset.py",
             "cwd": "${workspaceFolder}",
             "args": [
-                "--src_folder", "data/yixuan_test",
-                "--tgt_folder", "retargeted_data/yixuan_test",
+                "--src_folder", "data/move",
+                "--tgt_folder", "retargeted_data/move",
                 // "--robot", "unitree_g1",
                 "--robot", "unitree_g1_fixed_wrist",
             ],
