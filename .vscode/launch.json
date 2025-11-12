@@ -9,15 +9,17 @@
             "program": "${workspaceFolder}/scripts/smplx_to_robot.py",
             "cwd": "${workspaceFolder}",
             "args": [
-                "--smplx_file", "data/ACCAD/Male2Running_c3d/C1_-_stand_to_run_stageii.npz",
-                // "--robot", "unitree_g1",
-                "--robot", "unitree_g1_fixed_wrist",
+                // "--smplx_file", "data/AMASS/ACCAD/Female1General_c3d/A2_-_Sway_stageii.npz",
+                "--smplx_file", "data/AMASS/HDM05/tr/HDM_tr_02-01_01_120_stageii.npz",
+                "--robot", "unitree_g1",
+                // "--robot", "unitree_g1_fixed_wrist",
                 "--save_path", "retargeted_data/test.pkl",
                 "--rate_limit"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
         },
+        // python scripts/smplx_to_robot_dataset.py --src_folder data/AMASS --tgt_folder retargeted_data/AMASS --num_cpus 2 --robot unitree_g1_fixed_wrist
         {
             "name": "smplx_to_robot_dataset.py",
             "type": "debugpy",

@@ -155,8 +155,8 @@
         ],
         "left_shoulder_yaw_link": [
             "left_shoulder",
-            0,
             10,
+            0,
             [
                 0.0,
                 0.0,
@@ -171,8 +171,8 @@
         ],
         "left_elbow_link": [
             "left_elbow",
-            0,
             10,
+            0,
             [
                 0.0,
                 0.0,
@@ -187,8 +187,8 @@
         ],
         "left_wrist_yaw_link": [
             "left_wrist",
-            0,
             10,
+            0,
             [
                 0.0,
                 0.0,
@@ -203,8 +203,8 @@
         ],
         "right_shoulder_yaw_link": [
             "right_shoulder",
-            0,
             10,
+            0,
             [
                 0.0,
                 0.0,
@@ -219,8 +219,8 @@
         ],
         "right_elbow_link": [
             "right_elbow",
-            0,
             10,
+            0,
             [
                 0.0,
                 0.0,
@@ -235,8 +235,8 @@
         ],
         "right_wrist_yaw_link": [
             "right_wrist",
-            0,
             10,
+            0,
             [
                 0.0,
                 0.0,
