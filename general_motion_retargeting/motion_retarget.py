@@ -190,6 +190,7 @@ class GeneralMotionRetargeting:
             self.configuration.data.qpos[3:7] = root_rot
             # Forward kinematics to update the configuration
             mj.mj_forward(self.model, self.configuration.data)
+            self.init_root_pose = False
 
         if self.use_ik_match_table1:
             # Solve the IK problem
