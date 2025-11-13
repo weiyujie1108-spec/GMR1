@@ -10,8 +10,8 @@
             "cwd": "${workspaceFolder}",
             "args": [
                 // "--smplx_file", "data/AMASS/ACCAD/Female1General_c3d/A2_-_Sway_stageii.npz",
-                // "--smplx_file", "data/AMASS/HDM05/tr/HDM_tr_02-01_01_120_stageii.npz",
-                "--smplx_file", "data/AMASS/HDM05/tr/HDM_tr_03-01_01_120_stageii.npz",
+                "--smplx_file", "data/AMASS/HDM05/tr/HDM_tr_02-01_01_120_stageii.npz",
+                // "--smplx_file", "data/AMASS/HDM05/tr/HDM_tr_03-01_01_120_stageii.npz",
                 "--robot", "unitree_g1",
                 // "--robot", "unitree_g1_fixed_wrist",
                 "--save_path", "retargeted_data/test.pkl",
