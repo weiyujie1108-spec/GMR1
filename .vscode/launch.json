@@ -20,7 +20,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
-        // python scripts/smplx_to_robot_dataset.py --src_folder data/AMASS --tgt_folder retargeted_data/AMASS --num_cpus 2 --robot unitree_g1_fixed_wrist
+        // python scripts/smplx_to_robot_dataset.py --src_folder data/AMASS --tgt_folder retargeted_data/AMASS --num_cpus 2 --robot unitree_g1_fixed_wrist --memory_threshold 10
         {
             "name": "smplx_to_robot_dataset.py",
             "type": "debugpy",
