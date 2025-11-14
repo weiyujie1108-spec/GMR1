@@ -56,7 +56,7 @@ G1_ROTATION_AXIS = torch.tensor([[
     
     [0, 1, 0], # r_elbow
     ]])
-def check_memory(threshold_gb=10):  # adjust based on your available memory
+def check_memory(threshold_gb):  # adjust based on your available memory
     mem = psutil.virtual_memory()
     used_memory_gb = (mem.total - mem.available) / (1024 ** 3)
     available_memory_gb = mem.available / (1024 ** 3)
@@ -69,7 +69,7 @@ def check_memory(threshold_gb=10):  # adjust based on your available memory
 HERE = pathlib.Path(__file__).parent
 
 
-def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_folder, total_files, verbose=False):
+def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_folder, total_files, memory_threshold, verbose=False):
     def log_memory(message):
         if verbose:
             process = psutil.Process(os.getpid())
@@ -84,7 +84,7 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
     log_memory("Initial memory usage")
     
     num_pause = 0
-    while check_memory():
+    while check_memory(memory_threshold):
         print(f"[PAUSE] Paused processing {smplx_file_path} to prevent memory overflow. num_pause: {num_pause}")
         time.sleep(60*2)
         num_pause += 1
@@ -237,6 +237,7 @@ def main():
     
     parser.add_argument("--override", default=False, action="store_true")
     parser.add_argument("--num_cpus", default=4, type=int)
+    parser.add_argument("--memory_threshold", default=10, type=float, help="Memory threshold in GB for pausing processing (default: 10)")
     args = parser.parse_args()
     
     # print the total number of cpus and gpus
@@ -295,8 +296,9 @@ def main():
     
     total_files = len(args_list)
     print(f"Total number of files to process: {total_files}")
+    print(f"Memory threshold: {args.memory_threshold} GB")
     with mp.Pool(args.num_cpus) as pool:
-        pool.starmap(process_file, [args + (total_files, verbose) for args in args_list])
+        pool.starmap(process_file, [args + (total_files, args.memory_threshold, verbose) for args in args_list])
 
     print("Done. Saved to ", tgt_folder)
 
