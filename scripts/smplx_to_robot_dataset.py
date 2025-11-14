@@ -298,7 +298,7 @@ def main():
     print(f"Total number of files to process: {total_files}")
     print(f"Memory threshold: {args.memory_threshold} GB")
     with mp.Pool(args.num_cpus) as pool:
-        pool.starmap(process_file, [args + (total_files, args.memory_threshold, verbose) for args in args_list])
+        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose) for args_i in args_list])
 
     print("Done. Saved to ", tgt_folder)
 
