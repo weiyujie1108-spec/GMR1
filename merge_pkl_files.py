@@ -70,6 +70,11 @@ def merge_pkl_files(input_dir, output_file):
             # 生成 key 名称
             key_name = get_key_name(pkl_file, input_dir)
             
+            # 如果data是字典且只有一个key，提取内层数据
+            if isinstance(data, dict) and len(data) == 1:
+                inner_key = list(data.keys())[0]
+                data = data[inner_key]
+            
             # 存储到合并的字典中
             if key_name in merged_data:
                 print(f"\n警告: key '{key_name}' 已存在，将被覆盖")
