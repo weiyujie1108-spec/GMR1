@@ -1,0 +1,221 @@
+================================================================================
+标注数据统计分析报告
+================================================================================
+
+【1. 总体统计】
+  总标注数量: 16999
+  标签分布:
+    normal: 12924 (76.03%)
+    abnormal: 3976 (23.39%)
+    difficult: 99 (0.58%)
+
+【2. 异常原因分布】
+  1. 与地形/场景存在交互: 1606 (40.39%)
+  3. 动作衔接异常或抖动: 1110 (27.92%)
+  2. 穿模或自碰撞: 913 (22.96%)
+  4. 重定向失败（奇怪姿势）: 104 (2.62%)
+  tiaozhen: 54 (1.36%)
+  太快了: 48 (1.21%)
+  跳帧: 47 (1.18%)
+  丢帧: 44 (1.11%)
+  掉帧: 41 (1.03%)
+  tioazhen: 6 (0.15%)
+  tiaozhne: 1 (0.03%)
+  掉帧抖动: 1 (0.03%)
+  无搬运物体: 1 (0.03%)
+
+【3. 按数据集统计】
+  ACCAD:
+    总数: 247
+    abnormal: 43 (17.41%)
+    difficult: 12 (4.86%)
+    normal: 192 (77.73%)
+  BMLmovi:
+    总数: 1864
+    abnormal: 571 (30.63%)
+    difficult: 3 (0.16%)
+    normal: 1290 (69.21%)
+  BMLrub:
+    总数: 3061
+    abnormal: 663 (21.66%)
+    difficult: 5 (0.16%)
+    normal: 2393 (78.18%)
+  CMU:
+    总数: 1979
+    abnormal: 646 (32.64%)
+    difficult: 60 (3.03%)
+    normal: 1273 (64.33%)
+  CNRS:
+    总数: 79
+    normal: 79 (100.00%)
+  DFaust:
+    总数: 129
+    abnormal: 39 (30.23%)
+    difficult: 2 (1.55%)
+    normal: 88 (68.22%)
+  DanceDB:
+    总数: 136
+    abnormal: 102 (75.00%)
+    difficult: 5 (3.68%)
+    normal: 29 (21.32%)
+  EKUT:
+    总数: 348
+    abnormal: 191 (54.89%)
+    normal: 157 (45.11%)
+  EyesJapanDataset:
+    总数: 750
+    abnormal: 413 (55.07%)
+    difficult: 1 (0.13%)
+    normal: 336 (44.80%)
+  GRAB:
+    总数: 1340
+    abnormal: 163 (12.16%)
+    normal: 1177 (87.84%)
+  HDM05:
+    总数: 215
+    abnormal: 49 (22.79%)
+    normal: 166 (77.21%)
+  HUMAN4D:
+    总数: 147
+    abnormal: 37 (25.17%)
+    difficult: 1 (0.68%)
+    normal: 109 (74.15%)
+  HumanEva:
+    总数: 28
+    normal: 28 (100.00%)
+  KIT:
+    总数: 3997
+    abnormal: 810 (20.27%)
+    normal: 3187 (79.73%)
+  MoSh:
+    总数: 77
+    abnormal: 20 (25.97%)
+    normal: 57 (74.03%)
+  PosePrior:
+    总数: 35
+    abnormal: 14 (40.00%)
+    difficult: 8 (22.86%)
+    normal: 13 (37.14%)
+  SFU:
+    总数: 44
+    abnormal: 22 (50.00%)
+    difficult: 2 (4.55%)
+    normal: 20 (45.45%)
+  SOMA:
+    总数: 69
+    abnormal: 14 (20.29%)
+    normal: 55 (79.71%)
+  SSM:
+    总数: 30
+    abnormal: 7 (23.33%)
+    normal: 23 (76.67%)
+  TCDHands:
+    总数: 62
+    abnormal: 59 (95.16%)
+    normal: 3 (4.84%)
+  TotalCapture:
+    总数: 37
+    abnormal: 18 (48.65%)
+    normal: 19 (51.35%)
+  Transitions:
+    总数: 103
+    abnormal: 4 (3.88%)
+    normal: 99 (96.12%)
+  WEIZMANN:
+    总数: 2222
+    abnormal: 91 (4.10%)
+    normal: 2131 (95.90%)
+
+【4. 按主体ID统计 (Top 10)】
+  Eyes_Japan_Dataset:
+    总数: 750, abnormal: 413 (55.07%), difficult: 1 (0.13%), normal: 336 (44.80%)
+  3:
+    总数: 530, abnormal: 143 (26.98%), normal: 387 (73.02%)
+  70:
+    总数: 510, abnormal: 8 (1.57%), normal: 502 (98.43%)
+  69:
+    总数: 446, normal: 446 (100.00%)
+  67:
+    总数: 434, abnormal: 8 (1.84%), normal: 426 (98.16%)
+  68:
+    总数: 431, abnormal: 69 (16.01%), normal: 362 (83.99%)
+  66:
+    总数: 410, abnormal: 6 (1.46%), normal: 404 (98.54%)
+  572:
+    总数: 320, abnormal: 23 (7.19%), normal: 297 (92.81%)
+  s1:
+    总数: 210, abnormal: 5 (2.38%), normal: 205 (97.62%)
+  675:
+    总数: 182, abnormal: 91 (50.00%), normal: 91 (50.00%)
+
+【5. 按对象类型统计 (Top 10)】
+  Subject:
+    总数: 1864, abnormal: 571 (30.63%), difficult: 3 (0.16%), normal: 1290 (69.21%)
+  Normal:
+    总数: 674, abnormal: 47 (6.97%), normal: 627 (93.03%)
+  Fast:
+    总数: 581, abnormal: 25 (4.30%), normal: 556 (95.70%)
+  Slow:
+    总数: 578, abnormal: 17 (2.94%), normal: 561 (97.06%)
+  walking:
+    总数: 398, abnormal: 39 (9.80%), normal: 359 (90.20%)
+  Mixed:
+    总数: 389, abnormal: 2 (0.51%), normal: 387 (99.49%)
+  push:
+    总数: 356, abnormal: 25 (7.02%), normal: 331 (92.98%)
+  displace:
+    总数: 216, normal: 216 (100.00%)
+  HDM:
+    总数: 215, abnormal: 49 (22.79%), normal: 166 (77.21%)
+  turn:
+    总数: 210, abnormal: 23 (10.95%), normal: 187 (89.05%)
+
+【6. 按动作类型统计 (Top 15)】
+  normal:
+    总数: 782, abnormal: 26 (3.32%), normal: 756 (96.68%)
+  pass:
+    总数: 414, abnormal: 47 (11.35%), normal: 367 (88.65%)
+  treadmill:
+    总数: 412, abnormal: 15 (3.64%), normal: 397 (96.36%)
+  lifting:
+    总数: 395, abnormal: 210 (53.16%), normal: 185 (46.84%)
+  recovery:
+    总数: 304, abnormal: 25 (8.22%), normal: 279 (91.78%)
+  pick:
+    总数: 276, abnormal: 24 (8.70%), normal: 252 (91.30%)
+  throwing:
+    总数: 268, abnormal: 41 (15.30%), normal: 227 (84.70%)
+  over:
+    总数: 211, abnormal: 83 (39.34%), normal: 128 (60.66%)
+  -:
+    总数: 173, abnormal: 25 (14.45%), difficult: 3 (1.73%), normal: 145 (83.82%)
+  inspect:
+    总数: 159, abnormal: 27 (16.98%), normal: 132 (83.02%)
+  from:
+    总数: 148, normal: 148 (100.00%)
+  with:
+    总数: 123, abnormal: 45 (36.59%), normal: 78 (63.41%)
+  tilt:
+    总数: 120, normal: 120 (100.00%)
+  1:
+    总数: 106, abnormal: 14 (13.21%), difficult: 1 (0.94%), normal: 91 (85.85%)
+  01:
+    总数: 102, abnormal: 17 (16.67%), difficult: 4 (3.92%), normal: 81 (79.41%)
+
+【7. 按日期统计】
+  2025-11-14:
+    总数: 1, normal: 1
+  2025-11-15:
+    总数: 1581, abnormal: 484, difficult: 3, normal: 1094
+  2025-11-16:
+    总数: 1326, abnormal: 360, difficult: 3, normal: 963
+  2025-11-17:
+    总数: 1492, abnormal: 266, difficult: 13, normal: 1213
+  2025-11-18:
+    总数: 2179, abnormal: 365, difficult: 39, normal: 1775
+  2025-11-19:
+    总数: 4697, abnormal: 1254, difficult: 31, normal: 3412
+  2025-11-20:
+    总数: 5723, abnormal: 1247, difficult: 10, normal: 4466
+
+================================================================================
