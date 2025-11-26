@@ -1,6 +1,7 @@
 import argparse
 import pathlib
 import os
+import sys
 import mujoco as mj
 import numpy as np
 from tqdm import tqdm
@@ -79,14 +80,29 @@ if __name__ == "__main__":
         default=30,
         type=int,
     )
+    
+    parser.add_argument(
+        "--output_name",
+        help="Name of the output pkl file to store all retargeted motions.",
+        default="all_motions.pkl",
+        type=str,
+    )
 
     args = parser.parse_args()
     
     src_folder = args.src_folder
     tgt_folder = args.tgt_folder
 
-   
-   
+    # Initialize the global data_dump dictionary to store all motions
+    data_dump = {}
+    
+    # Output file path for the combined pkl file
+    output_pkl_path = os.path.join(tgt_folder, args.output_name)
+    
+    # Check if output file exists and handle override
+    if os.path.exists(output_pkl_path) and not args.override:
+        print(f"Output file {output_pkl_path} already exists. Use --override to regenerate.")
+        sys.exit(0)
         
     # walk over all files in src_folder
     for dirpath, _, filenames in os.walk(src_folder):
@@ -96,13 +112,6 @@ if __name__ == "__main__":
                 
             # get the bvh file path
             bvh_file_path = os.path.join(dirpath, filename)
-            
-            # get the target file path
-            tgt_file_path = bvh_file_path.replace(src_folder, tgt_folder).replace(".bvh", ".pkl")
-
-            if os.path.exists(tgt_file_path) and not args.override:
-                print(f"Skipping {bvh_file_path} because {tgt_file_path} exists")
-                continue
             
             # Load LAFAN1 trajectory
             try:
@@ -213,12 +222,15 @@ if __name__ == "__main__":
             #     "link_body_list": body_names,
             # }
             
-            data_dump = {}
-            motion_name = tgt_file_path.split("/")[-1].split(".")[0]
+            # Add motion_data to the global data_dump dictionary
+            # Use relative path from src_folder to ensure unique motion names
+            rel_path = os.path.relpath(bvh_file_path, src_folder)
+            motion_name = rel_path.replace(".bvh", "").replace(os.sep, "_")
             data_dump[motion_name] = motion_data
-            os.makedirs(os.path.dirname(tgt_file_path), exist_ok=True)
-            with open(tgt_file_path, "wb") as f:
-                # pickle.dump(motion_data, f)
-                joblib.dump(data_dump, tgt_file_path)
 
-    print("Done. saved to ", tgt_folder)
+    # Save all motions to a single pkl file
+    os.makedirs(os.path.dirname(output_pkl_path), exist_ok=True)
+    with open(output_pkl_path, "wb") as f:
+        joblib.dump(data_dump, output_pkl_path)
+
+    print(f"Done. Saved {len(data_dump)} motions to {output_pkl_path}")

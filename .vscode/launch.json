@@ -67,10 +67,11 @@
             "program": "${workspaceFolder}/scripts/bvh_to_robot_dataset.py",
             "cwd": "${workspaceFolder}",
             "args": [
-                "--src_folder", "data/move",
-                "--tgt_folder", "retargeted_data/move",
+                "--src_folder", "data/mocap_record",
+                "--tgt_folder", "retargeted_data/mocap_record",
                 // "--robot", "unitree_g1",
                 "--robot", "unitree_g1_fixed_wrist",
+                "--output_name", "mocap_record_all_motions.pkl",
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
