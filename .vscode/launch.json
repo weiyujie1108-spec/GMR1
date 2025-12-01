@@ -93,5 +93,18 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
+        {
+            "name": "RGB Robot Retarget Client",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/rgb_robot_retarget_client.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--ip", "192.168.3.26",
+                "--robot", "unitree_g1_fixed_wrist"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
     ]
 }
