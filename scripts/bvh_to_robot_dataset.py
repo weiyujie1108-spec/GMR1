@@ -1,4 +1,5 @@
 # python scripts/bvh_to_robot_dataset.py --src_folder data/lafan --tgt_folder retargeted_data/lafan/ --robot unitree_g1_fixed_wrist --num_cpus 20 --memory_threshold 30
+# python scripts/bvh_to_robot_dataset.py --src_folder data/mocap_1127 --tgt_folder retargeted_data/mocap_1127/ --robot unitree_g1_fixed_wrist --num_cpus 20 --memory_threshold 30
 import argparse
 import pathlib
 import os
