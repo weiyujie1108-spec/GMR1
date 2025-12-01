@@ -106,5 +106,17 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
+        {
+            "name": "metrab_to_robot.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/metrab_to_robot.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--robot", "unitree_g1_fixed_wrist_metrabs",
+                "--server", "192.168.3.9",
+                "--port", "8081",
+            ],
+        },
     ]
 }
