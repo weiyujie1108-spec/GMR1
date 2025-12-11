@@ -1501,7 +1501,13 @@ def main():
         print(f"{'='*80}")
         print(f"Total motions scanned: {len(reports)}")
         print(f"Abnormal motions detected: {len(abnormal_reports)}")
-        print(f"Percentage: {len(abnormal_reports)/len(reports)*100:.2f}%\n")
+        
+        # Prevent division by zero
+        if len(reports) > 0:
+            percentage = len(abnormal_reports) / len(reports) * 100
+            print(f"Percentage: {percentage:.2f}%\n")
+        else:
+            print("Percentage: 0.00%\n")
         
         # Count by issue type
         floating_count = sum(1 for r in abnormal_reports if r.floating.is_floating)

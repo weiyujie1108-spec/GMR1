@@ -67,7 +67,7 @@ def check_memory(threshold_gb):
     return False
 
 
-def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, total_files, memory_threshold, verbose=False):
+def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, total_files, memory_threshold, verbose=False, save_auto_check_format=False):
     """处理单个 BVH 文件并保存"""
     def log_memory(message):
         if verbose:
@@ -129,11 +129,20 @@ def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, to
     root_rot[:, [0, 1, 2, 3]] = root_rot[:, [1, 2, 3, 0]]
     dof_pos = qpos_list[:, 7:]
     num_frames = root_pos.shape[0]
-    
     # Initialize the forward kinematics
     device = "cuda:0"
     kinematics_model = KinematicsModel(retarget.xml_file, device=device)
-    
+    if save_auto_check_format:
+        # obtain local body pos
+        identity_root_pos = torch.zeros((num_frames, 3), device=device)
+        identity_root_rot = torch.zeros((num_frames, 4), device=device)
+        identity_root_rot[:, -1] = 1.0
+        local_body_pos, _ = kinematics_model.forward_kinematics(
+            identity_root_pos, 
+            identity_root_rot, 
+            torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
+        )
+        body_names = kinematics_model.body_names
     # Height adjustment
     HEIGHT_ADJUST = True
     PERFRAME_ADJUST = False
@@ -172,24 +181,25 @@ def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, to
     pose_aa = pose_aa[:, 1:]
     num_frames = num_frames - 1
     
+    # Create motion data with consistent format for auto_check
     motion_data = {
-        "root_trans_offset": root_pos,
-        "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
-        "dof": dof_pos,
+        "root_pos": root_pos,
         "root_rot": root_rot,
+        "dof_pos": dof_pos,
         "fps": 30,
+        "local_body_pos": local_body_pos.detach().cpu().numpy() if save_auto_check_format else np.array([]),
+        "link_body_list": body_names if save_auto_check_format else []
     }
     
     # Generate motion name
     rel_path = os.path.relpath(bvh_file_path, src_folder)
     motion_name = rel_path.replace(".bvh", "").replace(os.sep, "_")
     
-    # Save to individual pkl file
-    data_dump = {}
-    data_dump[motion_name] = motion_data
+    # Save to individual pkl file - use consistent format for both modes
+    data_dump = {motion_name: motion_data}
     os.makedirs(os.path.dirname(tgt_file_path), exist_ok=True)
     with open(tgt_file_path, "wb") as f:
-        joblib.dump(data_dump, tgt_file_path)
+        joblib.dump(data_dump, f)
     
     # Progress print based on tgt_folder
     done = 0
@@ -258,6 +268,12 @@ if __name__ == "__main__":
         help="Memory threshold in GB for pausing processing (default: 10)"
     )
 
+    parser.add_argument(
+        "--save_auto_check_format",
+        default=False,
+        action="store_true",
+    )
+
     args = parser.parse_args()
     
     # Print CPU information
@@ -290,6 +306,6 @@ if __name__ == "__main__":
     # Process files in parallel
     # Each process will save its own file and print progress
     with mp.Pool(args.num_cpus) as pool:
-        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose) for args_i in args_list])
+        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose, args.save_auto_check_format) for args_i in args_list])
 
     print(f"Done. Saved to {tgt_folder}")

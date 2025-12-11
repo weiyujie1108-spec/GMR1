@@ -1,12 +1,15 @@
 
-import pickle
+import joblib
 
 def load_robot_motion(motion_file):
     """
     Load robot motion data from a pickle file.
     """
     with open(motion_file, "rb") as f:
-        motion_data = pickle.load(f)
+        motion_data = joblib.load(f)
+        if isinstance(motion_data, dict) and len(motion_data) == 1:
+            inner_key = list(motion_data.keys())[0]
+            motion_data = motion_data[inner_key]
         motion_fps = motion_data["fps"]
         motion_root_pos = motion_data["root_pos"]
         motion_root_rot = motion_data["root_rot"][:, [3, 0, 1, 2]] # from xyzw to wxyz

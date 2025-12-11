@@ -148,13 +148,13 @@ class GeneralMotionRetargeting:
             VELOCITY_LIMITS = {k: 3*np.pi for k in self.robot_motor_names.keys()}
             self.ik_limits.append(mink.VelocityLimit(self.model, VELOCITY_LIMITS)) 
         # Add foot stick limit not used for now
-        self.foot_stick_limit = FootStickLimit(
-            model=self.model,
-            left_foot_frame_name="left_ankle_roll_link",
-            right_foot_frame_name="right_ankle_roll_link",
-            frame_type="body",
-            tolerance=1e-5
-        )
+        # self.foot_stick_limit = FootStickLimit(
+        #     model=self.model,
+        #     left_foot_frame_name="left_ankle_roll_link",
+        #     right_foot_frame_name="right_ankle_roll_link",
+        #     frame_type="body",
+        #     tolerance=1e-5
+        # )
         # self.ik_limits.append(self.foot_stick_limit)
         self.setup_retarget_configuration()
         
