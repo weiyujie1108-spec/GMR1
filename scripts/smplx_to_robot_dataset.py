@@ -69,7 +69,7 @@ def check_memory(threshold_gb):  # adjust based on your available memory
 HERE = pathlib.Path(__file__).parent
 
 
-def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_folder, total_files, memory_threshold, verbose=False):
+def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_folder, total_files, memory_threshold, verbose=False, save_auto_check_format=False):
     def log_memory(message):
         if verbose:
             process = psutil.Process(os.getpid())
@@ -150,7 +150,17 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
     # log_memory("After forward kinematics")
 
     # body_names = kinematics_model.body_names
-    
+    if save_auto_check_format:
+        # obtain local body pos
+        identity_root_pos = torch.zeros((num_frames, 3), device=device)
+        identity_root_rot = torch.zeros((num_frames, 4), device=device)
+        identity_root_rot[:, -1] = 1.0
+        local_body_pos, _ = kinematics_model.forward_kinematics(
+            identity_root_pos, 
+            identity_root_rot, 
+            torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
+        )
+        body_names = kinematics_model.body_names
     HEIGHT_ADJUST = True
     if HEIGHT_ADJUST:
         # height adjust to ensure the lowerset part is on the ground
@@ -177,14 +187,26 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
     dof_pos_all = torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
     pose_aa = torch.cat([rot_vec_all[None, :, None], G1_ROTATION_AXIS * dof_pos_all[None,:,:,None], torch.zeros((1, num_frames, 3, 3),device=device)], axis = 2)
             
-
-    motion_data = {
-        "root_trans_offset": root_pos,
-        "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
-        "dof": dof_pos,
-        "root_rot": root_rot,
-        "fps": 30,
-    }
+    if save_auto_check_format:
+        motion_data = {
+            "root_trans_offset": root_pos,
+            "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+            "dof": dof_pos,
+            "root_rot": root_rot,
+            "fps": 30,
+            "root_pos": root_pos,
+            "dof_pos": dof_pos,
+            "local_body_pos": local_body_pos.detach().cpu().numpy(),
+            "link_body_list": body_names,
+        }
+    else:
+        motion_data = {
+            "root_trans_offset": root_pos,
+            "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+            "dof": dof_pos,
+            "root_rot": root_rot,
+            "fps": 30,
+        }
     # motion_data = {
     #     "fps": aligned_fps,
     #     "root_pos": root_pos,
@@ -238,6 +260,7 @@ def main():
     parser.add_argument("--override", default=False, action="store_true")
     parser.add_argument("--num_cpus", default=4, type=int)
     parser.add_argument("--memory_threshold", default=10, type=float, help="Memory threshold in GB for pausing processing (default: 10)")
+    parser.add_argument("--save_auto_check_format", default=False, action="store_true")
     args = parser.parse_args()
     
     # print the total number of cpus and gpus
@@ -298,7 +321,7 @@ def main():
     print(f"Total number of files to process: {total_files}")
     print(f"Memory threshold: {args.memory_threshold} GB")
     with mp.Pool(args.num_cpus) as pool:
-        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose) for args_i in args_list])
+        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose, args.save_auto_check_format) for args_i in args_list])
 
     print("Done. Saved to ", tgt_folder)
 

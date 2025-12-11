@@ -181,25 +181,38 @@ def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, to
     pose_aa = pose_aa[:, 1:]
     num_frames = num_frames - 1
     
-    # Create motion data with consistent format for auto_check
-    motion_data = {
-        "root_pos": root_pos,
-        "root_rot": root_rot,
-        "dof_pos": dof_pos,
-        "fps": 30,
-        "local_body_pos": local_body_pos.detach().cpu().numpy() if save_auto_check_format else np.array([]),
-        "link_body_list": body_names if save_auto_check_format else []
-    }
+    if save_auto_check_format:
+        motion_data = {
+            "root_trans_offset": root_pos,
+            "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+            "dof": dof_pos,
+            "root_rot": root_rot,
+            "fps": 30,
+            "root_pos": root_pos,
+            "dof_pos": dof_pos,
+            "local_body_pos": local_body_pos.detach().cpu().numpy(),
+            "link_body_list": body_names,
+        }
+    else:
+        motion_data = {
+            "root_trans_offset": root_pos,
+            "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+            "dof": dof_pos,
+            "root_rot": root_rot,
+            "fps": 30,
+        }
     
+
     # Generate motion name
     rel_path = os.path.relpath(bvh_file_path, src_folder)
     motion_name = rel_path.replace(".bvh", "").replace(os.sep, "_")
     
-    # Save to individual pkl file - use consistent format for both modes
-    data_dump = {motion_name: motion_data}
+    # Save to individual pkl file
+    data_dump = {}
+    data_dump[motion_name] = motion_data
     os.makedirs(os.path.dirname(tgt_file_path), exist_ok=True)
     with open(tgt_file_path, "wb") as f:
-        joblib.dump(data_dump, f)
+        joblib.dump(data_dump, tgt_file_path)
     
     # Progress print based on tgt_folder
     done = 0
