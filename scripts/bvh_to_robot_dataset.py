@@ -106,6 +106,7 @@ def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, to
             src_human="bvh_nokov",
             tgt_robot=robot,
             actual_human_height=actual_human_height,
+            use_segment_length_scaling=True,
         )
         model = mj.MjModel.from_xml_path(retarget.xml_file)
         data = mj.MjData(model)

@@ -16,6 +16,7 @@ class GeneralMotionRetargeting:
         src_human: str,
         tgt_robot: str,
         actual_human_height: float = None,
+        use_segment_length_scaling: bool=True,
         solver: str="daqp", # change from "quadprog" to "daqp".
         damping: float=5e-1, # change from 1e-1 to 1e-2.
         verbose: bool=True,
@@ -60,15 +61,53 @@ class GeneralMotionRetargeting:
         if verbose:
             print("Use IK config: ", IK_CONFIG_DICT[src_human][tgt_robot])
         
+        # Flag to enable segment-length-based scaling
+        self.use_segment_length_scaling = use_segment_length_scaling  # Set to False to use height-based scaling
+        
+        # Store original scale table for reference
+        self.original_scale_table = ik_config["human_scale_table"].copy()
+        
         # compute the scale ratio based on given human height and the assumption in the IK config
         if actual_human_height is not None:
             ratio = actual_human_height / ik_config["human_height_assumption"]
         else:
             ratio = 1.0
             
-        # adjust the human scale table
-        for key in ik_config["human_scale_table"].keys():
-            ik_config["human_scale_table"][key] = ik_config["human_scale_table"][key] * ratio
+        # If segment-length-based scaling is disabled, use improved height-based scaling
+        if not self.use_segment_length_scaling:
+            # Improved scaling strategy: use different scaling for leg joints to prevent knee bending
+            # When human is shorter than assumption (ratio < 1), leg joints need less scaling reduction
+            # to maintain proper leg length ratio and prevent knee bending
+            leg_joint_keywords = ["hip", "knee", "foot", "ankle", "thigh", "shank", "calf", "leg"]
+            
+            # For leg joints: use a less aggressive scaling when ratio < 1
+            # This helps maintain proper leg length ratio and prevents knee bending
+            if ratio < 1.0:
+                # When human is shorter, reduce leg scaling less aggressively
+                # Use a square root function to make the scaling less linear
+                leg_ratio = np.sqrt(ratio)  # e.g., ratio=0.837 -> leg_ratio=0.915
+                # Or use a linear interpolation between ratio and 1.0
+                # leg_ratio = 0.7 * ratio + 0.3 * 1.0  # 70% of ratio + 30% of 1.0
+            else:
+                # When human is taller, use normal scaling
+                leg_ratio = ratio
+            
+            # adjust the human scale table with improved leg scaling
+            for key in ik_config["human_scale_table"].keys():
+                key_lower = key.lower()
+                # Check if this is a leg joint
+                is_leg_joint = any(keyword in key_lower for keyword in leg_joint_keywords)
+                
+                if is_leg_joint:
+                    # Use leg-specific scaling ratio
+                    ik_config["human_scale_table"][key] = ik_config["human_scale_table"][key] * leg_ratio
+                else:
+                    # Use normal scaling ratio for non-leg joints
+                    ik_config["human_scale_table"][key] = ik_config["human_scale_table"][key] * ratio
+        else:
+            # Segment-length-based scaling will be computed on first retarget call
+            # For now, keep original scale table
+            pass
     
 
         # used for retargeting
@@ -95,6 +134,14 @@ class GeneralMotionRetargeting:
 
         self.task_errors1 = {}
         self.task_errors2 = {}
+        
+        # Store verbose flag
+        self.verbose = verbose
+        
+        # Flag to track if segment lengths have been computed
+        self.segment_lengths_computed = False
+        self.human_segment_lengths = {}
+        self.robot_segment_lengths = {}
 
         self.ik_limits = [mink.ConfigurationLimit(self.model)]
         if use_velocity_limit:
@@ -157,7 +204,204 @@ class GeneralMotionRetargeting:
                 self.task_errors2[task] = []
 
   
+    def compute_human_segment_lengths(self, human_data):
+        """Compute actual segment lengths from human data (first frame)."""
+        human_data = self.to_numpy(human_data)
+        root_pos = human_data[self.human_root_name][0]
+        
+        segment_lengths = {}
+        
+        # Define segment pairs: (parent, child) -> segment_name
+        # Based on SMPL-X joint hierarchy
+        segment_pairs = {
+            # Leg segments
+            ("pelvis", "left_hip"): "left_thigh",
+            ("left_hip", "left_knee"): "left_shank",
+            ("left_knee", "left_foot"): "left_foot_segment",
+            ("pelvis", "right_hip"): "right_thigh",
+            ("right_hip", "right_knee"): "right_shank",
+            ("right_knee", "right_foot"): "right_foot_segment",
+            # Arm segments
+            ("spine3", "left_shoulder"): "left_upper_arm",
+            ("left_shoulder", "left_elbow"): "left_forearm",
+            ("spine3", "right_shoulder"): "right_upper_arm",
+            ("right_shoulder", "right_elbow"): "right_forearm",
+            # Torso
+            ("pelvis", "spine3"): "torso",
+        }
+        
+        for (parent, child), seg_name in segment_pairs.items():
+            if parent in human_data and child in human_data:
+                parent_pos = human_data[parent][0]
+                child_pos = human_data[child][0]
+                length = np.linalg.norm(child_pos - parent_pos)
+                segment_lengths[seg_name] = length
+                # Also store for individual joints (used for scaling)
+                if child not in segment_lengths:
+                    segment_lengths[child] = length
+        
+        return segment_lengths
+    
+    def compute_robot_segment_lengths(self):
+        """Compute actual segment lengths from robot model (zero pose)."""
+        # Use mink.Configuration to get frame positions
+        configuration = mink.Configuration(self.model)
+        
+        # Set to zero pose (all joints at 0)
+        configuration.data.qpos[:] = 0.0
+        mj.mj_forward(self.model, configuration.data)
+        
+        segment_lengths = {}
+        
+        # Get frame positions using mink FrameTask
+        frame_positions = {}
+        robot_joint_mapping = {}
+        
+        # Extract from ik_match_table1 to map human joints to robot frames
+        for robot_frame, (human_body, _, _, _, _) in self.ik_match_table1.items():
+            robot_joint_mapping[human_body] = robot_frame
+            try:
+                # Create a temporary FrameTask to get frame position
+                # Try site first (common for foot frames)
+                temp_task = mink.FrameTask(
+                    frame_name=robot_frame,
+                    frame_type="site",
+                    position_cost=1.0,
+                    orientation_cost=0.0,
+                )
+                # Set target to zero to get current frame position
+                temp_task.set_target(mink.SE3.identity())
+                # Get current frame transform (inverse of error gives current pose)
+                # Actually, we need to get the frame's current SE3 transform
+                # Use get_frame_jacobian to get frame info, or compute from error
+                # For now, use a simpler approach: get from task's internal state
+                # The error is target - current, so if target is identity, error = -current
+                error_se3 = temp_task.compute_error(configuration)
+                # Current position = -error (since target is identity)
+                frame_positions[robot_frame] = -error_se3.translation()
+            except:
+                try:
+                    # Try body type
+                    temp_task = mink.FrameTask(
+                        frame_name=robot_frame,
+                        frame_type="body",
+                        position_cost=1.0,
+                        orientation_cost=0.0,
+                    )
+                    temp_task.set_target(mink.SE3.identity())
+                    error_se3 = temp_task.compute_error(configuration)
+                    frame_positions[robot_frame] = -error_se3.translation()
+                except:
+                    if self.verbose:
+                        print(f"Warning: Could not get position for frame {robot_frame}")
+        
+        # Define segment pairs based on robot structure
+        segment_pairs = {}
+        
+        # Left leg: pelvis -> left_hip -> left_knee -> left_foot
+        if "left_hip" in robot_joint_mapping and "pelvis" in robot_joint_mapping:
+            hip_frame = robot_joint_mapping["left_hip"]
+            pelvis_frame = robot_joint_mapping["pelvis"]
+            if hip_frame in frame_positions and pelvis_frame in frame_positions:
+                segment_pairs["left_thigh"] = (pelvis_frame, hip_frame)
+        
+        if "left_knee" in robot_joint_mapping and "left_hip" in robot_joint_mapping:
+            knee_frame = robot_joint_mapping["left_knee"]
+            hip_frame = robot_joint_mapping["left_hip"]
+            if knee_frame in frame_positions and hip_frame in frame_positions:
+                segment_pairs["left_shank"] = (hip_frame, knee_frame)
+        
+        if "left_foot" in robot_joint_mapping and "left_knee" in robot_joint_mapping:
+            foot_frame = robot_joint_mapping["left_foot"]
+            knee_frame = robot_joint_mapping["left_knee"]
+            if foot_frame in frame_positions and knee_frame in frame_positions:
+                segment_pairs["left_foot_segment"] = (knee_frame, foot_frame)
+        
+        # Right leg
+        if "right_hip" in robot_joint_mapping and "pelvis" in robot_joint_mapping:
+            hip_frame = robot_joint_mapping["right_hip"]
+            pelvis_frame = robot_joint_mapping["pelvis"]
+            if hip_frame in frame_positions and pelvis_frame in frame_positions:
+                segment_pairs["right_thigh"] = (pelvis_frame, hip_frame)
+        
+        if "right_knee" in robot_joint_mapping and "right_hip" in robot_joint_mapping:
+            knee_frame = robot_joint_mapping["right_knee"]
+            hip_frame = robot_joint_mapping["right_hip"]
+            if knee_frame in frame_positions and hip_frame in frame_positions:
+                segment_pairs["right_shank"] = (hip_frame, knee_frame)
+        
+        if "right_foot" in robot_joint_mapping and "right_knee" in robot_joint_mapping:
+            foot_frame = robot_joint_mapping["right_foot"]
+            knee_frame = robot_joint_mapping["right_knee"]
+            if foot_frame in frame_positions and knee_frame in frame_positions:
+                segment_pairs["right_foot_segment"] = (knee_frame, foot_frame)
+        
+        # Compute lengths
+        for seg_name, (parent_frame, child_frame) in segment_pairs.items():
+            if parent_frame in frame_positions and child_frame in frame_positions:
+                length = np.linalg.norm(frame_positions[child_frame] - frame_positions[parent_frame])
+                segment_lengths[seg_name] = length
+        
+        return segment_lengths
+    
+    def update_scale_table_from_segment_lengths(self, human_data):
+        """Update human_scale_table based on actual segment length ratios."""
+        if self.segment_lengths_computed:
+            return  # Already computed
+        
+        # Compute segment lengths
+        self.human_segment_lengths = self.compute_human_segment_lengths(human_data)
+        self.robot_segment_lengths = self.compute_robot_segment_lengths()
+        
+        if self.verbose:
+            print("\n[Segment Length Scaling]")
+            print("Human segment lengths:", self.human_segment_lengths)
+            print("Robot segment lengths:", self.robot_segment_lengths)
+        
+        # Map human joints to segments for scaling
+        joint_to_segment = {
+            "left_hip": "left_thigh",
+            "left_knee": "left_shank",
+            "left_foot": "left_foot_segment",
+            "right_hip": "right_thigh",
+            "right_knee": "right_shank",
+            "right_foot": "right_foot_segment",
+            "left_shoulder": "left_upper_arm",
+            "left_elbow": "left_forearm",
+            "right_shoulder": "right_upper_arm",
+            "right_elbow": "right_forearm",
+            "spine3": "torso",
+        }
+        
+        # Update scale table based on segment length ratios
+        for joint_name in self.human_scale_table.keys():
+            if joint_name in joint_to_segment:
+                seg_name = joint_to_segment[joint_name]
+                if seg_name in self.human_segment_lengths and seg_name in self.robot_segment_lengths:
+                    human_len = self.human_segment_lengths[seg_name]
+                    robot_len = self.robot_segment_lengths[seg_name]
+                    
+                    if human_len > 1e-6:  # Avoid division by zero
+                        # Compute ratio: robot_length / human_length
+                        # Then multiply by original scale to get final scale
+                        length_ratio = robot_len / human_len
+                        original_scale = self.original_scale_table.get(joint_name, 1.0)
+                        self.human_scale_table[joint_name] = original_scale * length_ratio
+                        
+                        if self.verbose:
+                            print(f"  {joint_name}: human={human_len:.4f}m, robot={robot_len:.4f}m, "
+                                  f"ratio={length_ratio:.4f}, scale={self.human_scale_table[joint_name]:.4f}")
+        
+        self.segment_lengths_computed = True
+        
+        if self.verbose:
+            print("\nUpdated scale table:", self.human_scale_table)
+  
     def update_targets(self, human_data, offset_to_ground=False):
+        # If using segment-length-based scaling, compute and update scale table on first call
+        if self.use_segment_length_scaling and not self.segment_lengths_computed:
+            self.update_scale_table_from_segment_lengths(human_data)
+        
         # scale human data in local frame
         human_data = self.to_numpy(human_data)
         human_data = self.scale_human_data(human_data, self.human_root_name, self.human_scale_table)
