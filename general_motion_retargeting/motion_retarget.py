@@ -6,6 +6,7 @@ import json
 from scipy.spatial.transform import Rotation as R
 from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
+from .ik_utils import FootStickLimit
 
 class GeneralMotionRetargeting:
     """General Motion Retargeting (GMR).
@@ -99,7 +100,15 @@ class GeneralMotionRetargeting:
         if use_velocity_limit:
             VELOCITY_LIMITS = {k: 3*np.pi for k in self.robot_motor_names.keys()}
             self.ik_limits.append(mink.VelocityLimit(self.model, VELOCITY_LIMITS)) 
-            
+        # Add foot stick limit not used for now
+        self.foot_stick_limit = FootStickLimit(
+            model=self.model,
+            left_foot_frame_name="left_ankle_roll_link",
+            right_foot_frame_name="right_ankle_roll_link",
+            frame_type="body",
+            tolerance=1e-5
+        )
+        # self.ik_limits.append(self.foot_stick_limit)
         self.setup_retarget_configuration()
         
         self.ground_offset = 0.0
@@ -169,7 +178,12 @@ class GeneralMotionRetargeting:
                 task = self.human_body_to_task2[body_name]
                 pos, rot = human_data[body_name]
                 task.set_target(mink.SE3.from_rotation_and_translation(mink.SO3(rot), pos))
-            
+    
+    def set_foot_sticking(self, foot_sticking):
+        self.foot_stick_limit.set_state(
+            left_stick=foot_sticking['left_foot'],
+            right_stick=foot_sticking['right_foot'],
+        )     
             
     def retarget(self, human_data, offset_to_ground=False):
         # Update the task targets

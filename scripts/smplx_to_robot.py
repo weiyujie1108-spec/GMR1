@@ -4,10 +4,13 @@ import os
 import time
 
 import numpy as np
+import mujoco as mj
+from smplx.joint_names import JOINT_NAMES
 
 from general_motion_retargeting import GeneralMotionRetargeting as GMR
 from general_motion_retargeting import RobotMotionViewer
 from general_motion_retargeting.utils.smpl import load_smplx_file, get_smplx_data_offline_fast
+from general_motion_retargeting.ik_utils import extract_foot_sticking_sequence, analyze_and_plot_robot_motion, analyze_and_plot_human_motion, fix_feet_sliding
 
 from rich import print
 
@@ -64,6 +67,13 @@ if __name__ == "__main__":
         help="Limit the rate of the retargeted robot motion to keep the same as the human motion.",
     )
 
+    parser.add_argument(
+        "--fix_foot_sliding",
+        default=False,
+        action="store_true",
+        help="Fix the foot sliding.",
+    )
+
     args = parser.parse_args()
 
 
@@ -78,8 +88,36 @@ if __name__ == "__main__":
     # align fps
     tgt_fps = 30
     smplx_data_frames, aligned_fps = get_smplx_data_offline_fast(smplx_data, body_model, smplx_output, tgt_fps=tgt_fps)
-    
-   
+    if args.fix_foot_sliding:
+        # extract foot sticking sequence
+        joint_names = JOINT_NAMES[: len(body_model.parents)]
+
+        smplx_data_joints = np.zeros((len(smplx_data_frames), len(joint_names), 3))
+        for i, frame in enumerate(smplx_data_frames):
+            for j, name in enumerate(joint_names):
+                smplx_data_joints[i, j] = frame[name][0]
+        contact_threshold = 0.01
+        velocity_threshold = 0.05
+
+        foot_sticking_sequence = extract_foot_sticking_sequence(
+            smplx_data_joints,
+            joint_names,
+            ["left_foot", "right_foot"],
+            smpl_contact_threshold_relative=contact_threshold,
+            velocity_threshold=velocity_threshold,
+            fps=aligned_fps
+        )
+
+        # Visualize foot sticking sequence and feet analysis
+        analyze_and_plot_human_motion(
+            foot_sticking_sequence,
+            smplx_data_joints,
+            joint_names,
+            aligned_fps,
+            contact_threshold=contact_threshold,
+            velocity_threshold=velocity_threshold
+        )
+        
     # Initialize the retargeting system
     retarget = GMR(
         actual_human_height=actual_human_height,
@@ -104,8 +142,12 @@ if __name__ == "__main__":
         save_dir = os.path.dirname(args.save_path)
         if save_dir:  # Only create directory if it's not empty
             os.makedirs(save_dir, exist_ok=True)
-        qpos_list = []
     
+    # Lists to store robot motion data
+    qpos_list = []
+    robot_left_foot_pos_list = []
+    robot_right_foot_pos_list = []
+
     # Start the viewer
     i = 0
 
@@ -128,7 +170,16 @@ if __name__ == "__main__":
         
         # Update task targets.
         smplx_data = smplx_data_frames[i]
-
+        if args.fix_foot_sliding:
+            foot_sticking = foot_sticking_sequence[i]
+            retarget.set_foot_sticking(foot_sticking)
+            # Store robot motion data
+            left_foot_name = retarget.foot_stick_limit.left_name
+            right_foot_name = retarget.foot_stick_limit.right_name
+            left_id = mj.mj_name2id(retarget.model, mj.mjtObj.mjOBJ_BODY, left_foot_name)
+            right_id = mj.mj_name2id(retarget.model, mj.mjtObj.mjOBJ_BODY, right_foot_name)
+            robot_left_foot_pos_list.append(retarget.configuration.data.xpos[left_id].copy())
+            robot_right_foot_pos_list.append(retarget.configuration.data.xpos[right_id].copy())
         # retarget
         qpos = retarget.retarget(smplx_data)
 
@@ -146,6 +197,14 @@ if __name__ == "__main__":
         if args.save_path is not None:
             qpos_list.append(qpos)
             
+    # Fix feet sliding
+    if args.fix_foot_sliding:
+        qpos_list, robot_left_foot_pos_list, robot_right_foot_pos_list = fix_feet_sliding(
+            qpos_list,
+            robot_left_foot_pos_list,
+            robot_right_foot_pos_list,
+            foot_sticking_sequence
+        )
     if args.save_path is not None:
         import pickle
         root_pos = np.array([qpos[:3] for qpos in qpos_list])
@@ -166,7 +225,24 @@ if __name__ == "__main__":
         with open(args.save_path, "wb") as f:
             pickle.dump(motion_data, f)
         print(f"Saved to {args.save_path}")
-            
-      
+
+    if args.fix_foot_sliding:
+        # Robot Foot Analysis
+        robot_left_foot_pos = np.array(robot_left_foot_pos_list)
+        robot_right_foot_pos = np.array(robot_right_foot_pos_list)
+
+        left_foot_stick = [frame["left_foot"] for frame in foot_sticking_sequence]
+        right_foot_stick = [frame["right_foot"] for frame in foot_sticking_sequence]
+        analyze_and_plot_robot_motion(
+            robot_left_foot_pos,
+            robot_right_foot_pos,
+            qpos_list,
+            retarget,
+            aligned_fps,
+            contact_threshold=contact_threshold,
+            velocity_threshold=velocity_threshold,
+            human_left_foot_stick=left_foot_stick,
+            human_right_foot_stick=right_foot_stick,
+        )
     
     robot_motion_viewer.close()
