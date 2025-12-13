@@ -113,6 +113,7 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
         src_human="smplx",
         tgt_robot=tgt_robot,
         actual_human_height=actual_human_height,
+        use_segment_length_scaling=True,
     )
     qpos_list = []
     for smplx_frame_data in smplx_frame_data_list:

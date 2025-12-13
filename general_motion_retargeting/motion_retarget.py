@@ -205,30 +205,64 @@ class GeneralMotionRetargeting:
 
   
     def compute_human_segment_lengths(self, human_data):
-        """Compute actual segment lengths from human data (first frame)."""
+        """Compute actual segment lengths from human data (first frame).
+        
+        Automatically adapts to different human joint naming conventions:
+        - SMPL-X format: pelvis, left_hip, left_knee, left_foot, spine3, left_shoulder, left_elbow
+        - BVH format: Hips, LeftUpLeg, LeftLeg, LeftFootMod, Spine2, LeftArm, LeftForeArm
+        """
         human_data = self.to_numpy(human_data)
         root_pos = human_data[self.human_root_name][0]
         
         segment_lengths = {}
         
-        # Define segment pairs: (parent, child) -> segment_name
-        # Based on SMPL-X joint hierarchy
-        segment_pairs = {
-            # Leg segments
-            ("pelvis", "left_hip"): "left_thigh",
-            ("left_hip", "left_knee"): "left_shank",
-            ("left_knee", "left_foot"): "left_foot_segment",
-            ("pelvis", "right_hip"): "right_thigh",
-            ("right_hip", "right_knee"): "right_shank",
-            ("right_knee", "right_foot"): "right_foot_segment",
-            # Arm segments
-            ("spine3", "left_shoulder"): "left_upper_arm",
-            ("left_shoulder", "left_elbow"): "left_forearm",
-            ("spine3", "right_shoulder"): "right_upper_arm",
-            ("right_shoulder", "right_elbow"): "right_forearm",
-            # Torso
-            ("pelvis", "spine3"): "torso",
-        }
+        # Detect joint naming convention from available joints in human_data or scale_table
+        # Check if BVH format (has LeftUpLeg, RightUpLeg) or SMPL-X format (has left_hip, right_hip)
+        is_bvh_format = False
+        available_joints = set(human_data.keys())
+        
+        # Check for BVH-style joint names
+        bvh_indicators = ["LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "LeftFootMod", "RightFootMod"]
+        if any(joint in available_joints for joint in bvh_indicators):
+            is_bvh_format = True
+        
+        # Define segment pairs based on detected format
+        if is_bvh_format:
+            # BVH format joint names (bvh_nokov_to_g1.json)
+            segment_pairs = {
+                # Leg segments
+                ("Hips", "LeftUpLeg"): "left_thigh",
+                ("LeftUpLeg", "LeftLeg"): "left_shank",
+                ("LeftLeg", "LeftFootMod"): "left_foot_segment",
+                ("Hips", "RightUpLeg"): "right_thigh",
+                ("RightUpLeg", "RightLeg"): "right_shank",
+                ("RightLeg", "RightFootMod"): "right_foot_segment",
+                # Arm segments
+                ("Spine2", "LeftArm"): "left_upper_arm",
+                ("LeftArm", "LeftForeArm"): "left_forearm",
+                ("Spine2", "RightArm"): "right_upper_arm",
+                ("RightArm", "RightForeArm"): "right_forearm",
+                # Torso
+                ("Hips", "Spine2"): "torso",
+            }
+        else:
+            # SMPL-X format joint names (smplx_to_g1.json)
+            segment_pairs = {
+                # Leg segments
+                ("pelvis", "left_hip"): "left_thigh",
+                ("left_hip", "left_knee"): "left_shank",
+                ("left_knee", "left_foot"): "left_foot_segment",
+                ("pelvis", "right_hip"): "right_thigh",
+                ("right_hip", "right_knee"): "right_shank",
+                ("right_knee", "right_foot"): "right_foot_segment",
+                # Arm segments
+                ("spine3", "left_shoulder"): "left_upper_arm",
+                ("left_shoulder", "left_elbow"): "left_forearm",
+                ("spine3", "right_shoulder"): "right_upper_arm",
+                ("right_shoulder", "right_elbow"): "right_forearm",
+                # Torso
+                ("pelvis", "spine3"): "torso",
+            }
         
         for (parent, child), seg_name in segment_pairs.items():
             if parent in human_data and child in human_data:
@@ -241,6 +275,46 @@ class GeneralMotionRetargeting:
                     segment_lengths[child] = length
         
         return segment_lengths
+    
+    def get_site_name_for_body(self, body_name):
+        """Map body-like frame names to actual site names in the robot model.
+        
+        Args:
+            body_name: Body or frame name from IK config
+            
+        Returns:
+            Site name if mapping exists, None otherwise
+        """
+        # Explicit mappings from body-like frame names to site names
+        # Based on available sites: ['imu_in_pelvis', 'pelvis', 'left_foot', 'right_foot', 
+        #                            'imu_in_torso', 'mid360', 'left_palm', 'right_palm']
+        body_to_site_map = {
+            # Pelvis and torso
+            "pelvis": "pelvis",
+            "torso_link": "imu_in_torso",
+            
+            # Left leg
+            "left_hip_yaw_link": "left_foot",  # Use foot site as proxy for hip
+            "left_knee_link": "left_foot",     # Use foot site as proxy for knee
+            "left_ankle_roll_link": "left_foot",
+            
+            # Right leg
+            "right_hip_yaw_link": "right_foot",  # Use foot site as proxy for hip
+            "right_knee_link": "right_foot",     # Use foot site as proxy for knee
+            "right_ankle_roll_link": "right_foot",
+            
+            # Left arm
+            "left_shoulder_yaw_link": "left_palm",  # Use palm site as proxy for shoulder
+            "left_elbow_link": "left_palm",
+            "left_wrist_yaw_link": "left_palm",
+            
+            # Right arm
+            "right_shoulder_yaw_link": "right_palm",  # Use palm site as proxy for shoulder
+            "right_elbow_link": "right_palm",
+            "right_wrist_yaw_link": "right_palm",
+        }
+        
+        return body_to_site_map.get(body_name, None)
     
     def compute_robot_segment_lengths(self):
         """Compute actual segment lengths from robot model (zero pose)."""
@@ -260,40 +334,44 @@ class GeneralMotionRetargeting:
         # Extract from ik_match_table1 to map human joints to robot frames
         for robot_frame, (human_body, _, _, _, _) in self.ik_match_table1.items():
             robot_joint_mapping[human_body] = robot_frame
+            
+            # Get site name for this frame (map body names to site names)
+            site_name = self.get_site_name_for_body(robot_frame)
+            if site_name is None:
+                # If no mapping exists, try using the frame name directly as a site
+                site_name = robot_frame
+            
             try:
-                # Create a temporary FrameTask to get frame position
-                # Try site first (common for foot frames)
+                # Only use site type (as per user requirement)
                 temp_task = mink.FrameTask(
-                    frame_name=robot_frame,
+                    frame_name=site_name,
                     frame_type="site",
                     position_cost=1.0,
                     orientation_cost=0.0,
                 )
                 # Set target to zero to get current frame position
                 temp_task.set_target(mink.SE3.identity())
-                # Get current frame transform (inverse of error gives current pose)
-                # Actually, we need to get the frame's current SE3 transform
-                # Use get_frame_jacobian to get frame info, or compute from error
-                # For now, use a simpler approach: get from task's internal state
-                # The error is target - current, so if target is identity, error = -current
-                error_se3 = temp_task.compute_error(configuration)
-                # Current position = -error (since target is identity)
-                frame_positions[robot_frame] = -error_se3.translation()
-            except:
-                try:
-                    # Try body type
-                    temp_task = mink.FrameTask(
-                        frame_name=robot_frame,
-                        frame_type="body",
-                        position_cost=1.0,
-                        orientation_cost=0.0,
-                    )
-                    temp_task.set_target(mink.SE3.identity())
-                    error_se3 = temp_task.compute_error(configuration)
-                    frame_positions[robot_frame] = -error_se3.translation()
-                except:
-                    if self.verbose:
-                        print(f"Warning: Could not get position for frame {robot_frame}")
+                # Compute error (target - current)
+                error_result = temp_task.compute_error(configuration)
+                
+                # Handle both SE3 objects and numpy arrays
+                if hasattr(error_result, 'translation'):
+                    # SE3 object
+                    frame_positions[robot_frame] = -error_result.translation()
+                elif isinstance(error_result, np.ndarray):
+                    # numpy array (3D for position-only cost)
+                    if error_result.shape == (3,):
+                        frame_positions[robot_frame] = -error_result
+                    elif error_result.shape == (6,):
+                        # 6D array: [position(3), orientation(3)]
+                        frame_positions[robot_frame] = -error_result[:3]
+                    else:
+                        raise ValueError(f"Unexpected error result shape: {error_result.shape}")
+                else:
+                    raise ValueError(f"Unexpected error result type: {type(error_result)}")
+            except Exception as e:
+                if self.verbose:
+                    print(f"Warning: Could not get position for frame {robot_frame} (tried site '{site_name}'): {e}")
         
         # Define segment pairs based on robot structure
         segment_pairs = {}
