@@ -135,7 +135,7 @@ if __name__ == "__main__":
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
                                             motion_fps=aligned_fps,
-                                            transparent_robot=0,
+                                            transparent_robot=1 if args.interaction_mesh else 0,
                                             record_video=args.record_video,
                                             video_path=f"videos/{args.robot}_{args.smplx_file.split('/')[-1].split('.')[0]}.mp4",)
     
@@ -191,6 +191,45 @@ if __name__ == "__main__":
         # retarget
         qpos = retarget.retarget(smplx_data)
 
+        # visualization for interaction mesh
+        if args.interaction_mesh:
+            robot_keypoints = {}
+            correspondence_lines = []
+            ground_pts = []
+            x_range = np.linspace(-2, 2, 10)
+            y_range = np.linspace(-2, 2, 10)
+            for x in x_range:
+                for y in y_range:
+                    ground_pts.append(np.array([x, y, 0.0]))
+            extra_points = [{
+                'pos': ground_pts,
+                'color': [1, 0, 0, 0.5],
+                'size': [0.02, 0.02, 0.02]
+            }]
+
+            for robot_link_name, entry in retarget.ik_match_table1.items():
+                human_joint_name = entry[0]
+
+                robot_pos = None
+                try:
+                    bid = mj.mj_name2id(retarget.model, mj.mjtObj.mjOBJ_BODY, robot_link_name)
+                    if bid != -1:
+                        robot_pos = retarget.configuration.data.xpos[bid].copy()
+                        robot_keypoints[robot_link_name] = robot_pos
+                except Exception as e:
+                    pass
+
+                human_pos = None
+                if human_joint_name in retarget.scaled_human_data:
+                    human_pos = retarget.scaled_human_data[human_joint_name][0] + np.array([0.0, 0.0, 0.0]) # Add offset if needed
+
+                if robot_pos is not None and human_pos is not None:
+                    correspondence_lines.append((human_pos, robot_pos))
+        else:
+            robot_keypoints = None
+            extra_points = None
+            correspondence_lines = None
+
         # visualize
         robot_motion_viewer.step(
             root_pos=qpos[:3],
@@ -201,6 +240,10 @@ if __name__ == "__main__":
             human_pos_offset=np.array([0.0, 0.0, 0.0]),
             show_human_body_name=False,
             rate_limit=args.rate_limit,
+            follow_camera=True,
+            robot_keypoints=robot_keypoints,
+            extra_points=extra_points,
+            lines=correspondence_lines
         )
         if args.save_path is not None:
             qpos_list.append(qpos)

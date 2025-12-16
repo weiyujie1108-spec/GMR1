@@ -106,6 +106,10 @@ class RobotMotionViewer:
             # rate limit
             rate_limit=True, 
             follow_camera=True,
+            # extra visualization for interaction mesh
+            extra_points=None, # List of point sets or dicts
+            robot_keypoints=None, # Dict of {name: pos}
+            lines=None, # List of (start_pos, end_pos) tuples
             ):
         """
         by default visualize robot motion.
@@ -116,6 +120,8 @@ class RobotMotionViewer:
         if rate_limit is True, the motion will be visualized at the same rate as the motion data.
         else, the motion will be visualized as fast as possible.
         """
+        # Clean custom geometry
+        self.viewer.user_scn.ngeom = 0
         
         self.data.qpos[:3] = root_pos
         self.data.qpos[3:7] = root_rot # quat need to be scalar first! for mujoco
@@ -130,8 +136,6 @@ class RobotMotionViewer:
             # self.viewer.cam.azimuth = 180    # 正面朝向机器人
         
         if human_motion_data is not None:
-            # Clean custom geometry
-            self.viewer.user_scn.ngeom = 0
             # Draw the task targets for reference
             for human_body_name, (pos, rot) in human_motion_data.items():
                 draw_frame(
@@ -142,6 +146,83 @@ class RobotMotionViewer:
                     pos_offset=human_pos_offset,
                     joint_name=human_body_name if show_human_body_name else None
                     )
+                if extra_points is not None: # draw ball
+                    geom = self.viewer.user_scn.geoms[self.viewer.user_scn.ngeom]
+                    mj.mjv_initGeom(
+                        geom,
+                        type=mj.mjtGeom.mjGEOM_SPHERE,
+                        size=[0.05, 0.05, 0.05],
+                        pos=pos + human_pos_offset,
+                        mat=np.eye(3).flatten(),
+                        rgba=[0, 1, 0, 0.5], # Green color, transparent
+                    )
+                    self.viewer.user_scn.ngeom += 1
+
+        if extra_points is not None:
+            for points in extra_points:
+                # Handle different formats of points
+                if isinstance(points, dict):
+                    pts = points.get('pos', [])
+                    color = points.get('color', [1, 0, 0, 0.5]) # Default red, transparent
+                    size = points.get('size', [0.03, 0.03, 0.03])
+                else:
+                    pts = points
+                    color = [1, 0, 0, 0.5] # Default red, transparent
+                    size = [0.03, 0.03, 0.03]
+
+                for p in pts:
+                    if self.viewer.user_scn.ngeom < self.viewer.user_scn.maxgeom:
+                        geom = self.viewer.user_scn.geoms[self.viewer.user_scn.ngeom]
+                        mj.mjv_initGeom(
+                            geom,
+                            type=mj.mjtGeom.mjGEOM_SPHERE,
+                            size=size,
+                            pos=p,
+                            mat=np.eye(3).flatten(),
+                            rgba=color,
+                        )
+                        self.viewer.user_scn.ngeom += 1
+
+        if robot_keypoints is not None:
+            for name, pos in robot_keypoints.items():
+                if self.viewer.user_scn.ngeom < self.viewer.user_scn.maxgeom:
+                    geom = self.viewer.user_scn.geoms[self.viewer.user_scn.ngeom]
+                    mj.mjv_initGeom(
+                        geom,
+                        type=mj.mjtGeom.mjGEOM_SPHERE,
+                        size=[0.04, 0.04, 0.04],
+                        pos=pos,
+                        mat=np.eye(3).flatten(),
+                        rgba=[0, 0, 1, 0.5], # Blue color, transparent
+                    )
+                    self.viewer.user_scn.ngeom += 1
+
+        if lines is not None:
+            for start_pos, end_pos in lines:
+                if self.viewer.user_scn.ngeom < self.viewer.user_scn.maxgeom:
+                    geom = self.viewer.user_scn.geoms[self.viewer.user_scn.ngeom]
+                    mj.mjv_initGeom(
+                        geom,
+                        type=mj.mjtGeom.mjGEOM_CAPSULE,
+                        size=[0.005, 0.005, 0.005], # Radius
+                        pos=(start_pos + end_pos) / 2,
+                        mat=np.eye(3).flatten(),
+                        rgba=[1, 1, 0, 0.5], # Yellow color, transparent
+                    )
+                    # Calculate vector and length for capsule orientation
+                    vec = end_pos - start_pos
+                    length = np.linalg.norm(vec)
+                    if length > 1e-6:
+                        pass
+                    mj.mjv_connector(
+                        geom,
+                        type=mj.mjtGeom.mjGEOM_CAPSULE,
+                        width=0.005,
+                        from_=start_pos,
+                        to=end_pos,
+                    )
+                    geom.rgba = [1, 1, 0, 0.5]
+                    self.viewer.user_scn.ngeom += 1
 
         self.viewer.sync()
         if rate_limit is True:
