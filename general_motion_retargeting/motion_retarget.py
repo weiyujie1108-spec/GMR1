@@ -6,7 +6,11 @@ import json
 from scipy.spatial.transform import Rotation as R
 from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
-from .ik_utils import FootStickLimit
+from .ik_utils import (
+    FootStickLimit,
+    InteractionMeshTask,
+)
+from scipy.spatial import Delaunay
 
 class GeneralMotionRetargeting:
     """General Motion Retargeting (GMR).
@@ -21,6 +25,7 @@ class GeneralMotionRetargeting:
         damping: float=5e-1, # change from 1e-1 to 1e-2.
         verbose: bool=True,
         use_velocity_limit: bool=False,
+        use_interaction_mesh: bool=False,
     ) -> None:
 
         # load the robot model
@@ -147,6 +152,11 @@ class GeneralMotionRetargeting:
         if use_velocity_limit:
             VELOCITY_LIMITS = {k: 3*np.pi for k in self.robot_motor_names.keys()}
             self.ik_limits.append(mink.VelocityLimit(self.model, VELOCITY_LIMITS)) 
+
+        # interaction mesh related
+        self.use_interaction_mesh = use_interaction_mesh
+        self.interaction_mesh_task = None
+
         # Add foot stick limit not used for now
         # self.foot_stick_limit = FootStickLimit(
         #     model=self.model,
@@ -475,6 +485,126 @@ class GeneralMotionRetargeting:
         if self.verbose:
             print("\nUpdated scale table:", self.human_scale_table)
   
+    def _create_interaction_mesh(self, vertices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """ Creates a tetrahedral mesh from human and object points using Delaunay triangulation. """
+        tri = Delaunay(vertices) # in size (num_vertices, 3)
+        return vertices, tri.simplices
+
+    def _get_adjacency_list(self, tetrahedra, num_vertices) -> list[list[int]]:
+        """ Creates an adjacency list from the tetrahedra. """
+        adj = [set() for _ in range(num_vertices)]
+        for tet in tetrahedra:
+            for i in range(4):
+                for j in range(i + 1, 4):
+                    u, v = tet[i], tet[j]
+                    adj[u].add(v)
+                    adj[v].add(u)
+        return [list(s) for s in adj]
+
+    def _calculate_laplacian_coordinates(
+        self,
+        vertices: np.ndarray, # (N, 3)
+        adj_list: list[list[int]], # (N, )
+        epsilon=1e-6, # prevent division by zero
+        uniform_weight=True # whether to use uniform weights
+    ) -> np.ndarray: # (N, 3)
+        """ Calculates the Laplacian coordinates for each vertex in the mesh. """
+        laplacian = np.zeros_like(vertices)
+
+        for i in range(len(vertices)):
+            neighbors_indices = adj_list[i]
+            if len(neighbors_indices) > 0:
+                vi = vertices[i]
+                neighbor_positions = vertices[neighbors_indices]
+                distances = np.linalg.norm(vi - neighbor_positions, axis=1)
+
+                if uniform_weight:
+                    weights = np.ones_like(distances)
+                else:
+                    weights = 1.0 / (1.5 * distances + epsilon)
+
+                sum_of_weights = np.sum(weights)
+                weighted_sum_of_neighbors = np.sum(weights[:, np.newaxis] * neighbor_positions, axis=0)
+                center_of_neighbors = weighted_sum_of_neighbors / sum_of_weights
+                laplacian[i] = vi - center_of_neighbors
+
+        return laplacian # (N, 3)
+
+    def _calculate_laplacian_matrix(
+        self,
+        vertices: np.ndarray, # (N, 3)
+        adj_list: list[list[int]], # (N, )
+        epsilon=1e-6, # prevent division by zero
+        uniform_weight=True # whether to use uniform weights
+    ) -> np.ndarray: # (N, N)
+        """ Calculates the Laplacian matrix for the mesh with optional weight schemes. """
+        N = len(vertices)
+        laplacian_matrix = np.zeros((N, N))
+
+        for i in range(N):
+            neighbors_indices = adj_list[i]
+            if len(neighbors_indices) > 0:
+                if uniform_weight:
+                    weights = np.ones(len(neighbors_indices)) / len(neighbors_indices)
+                else:
+                    vi = vertices[i]
+                    neighbor_positions = vertices[neighbors_indices]
+                    distances = np.linalg.norm(vi - neighbor_positions, axis=1)
+                    weights = 1.0 / (distances + epsilon)
+                    sum_weights = np.sum(weights)
+                    weights = weights / sum_weights
+
+                laplacian_matrix[i, i] = 1.0
+
+                for j, neighbor_idx in enumerate(neighbors_indices):
+                    laplacian_matrix[i, neighbor_idx] = -weights[j]
+
+        return laplacian_matrix
+
+    def update_interaction_mesh(self, human_mapped_joints, object_points):
+        """ Updates the interaction mesh and computes the target Laplacian. """
+        # Combine human and object points
+        vertices = np.vstack([human_mapped_joints, object_points])
+
+        # Create interaction mesh (tetrahedralization)
+        vertices, tetrahedra = self._create_interaction_mesh(vertices)
+
+        # Compute adjacency list
+        adj_list = self._get_adjacency_list(tetrahedra, len(vertices))
+
+        # Compute target Laplacian coordinates
+        self.target_laplacian = self._calculate_laplacian_coordinates(vertices, adj_list)
+
+        # Compute Laplacian matrix
+        self.laplacian_matrix = self._calculate_laplacian_matrix(vertices, adj_list)
+
+        # Compute adjacency list
+        adj_list = self._get_adjacency_list(tetrahedra, len(vertices))
+
+        # Compute target Laplacian coordinates
+        self.target_laplacian = self._calculate_laplacian_coordinates(vertices, adj_list)
+
+        # Compute Laplacian matrix
+        L = self._calculate_laplacian_matrix(vertices, adj_list)
+
+        # Update or create InteractionMeshTask
+        frame_names = list(self.ik_match_table2.keys())
+        fixed_points = list(object_points)
+
+        if self.interaction_mesh_task is not None:
+            if self.interaction_mesh_task in self.tasks2:
+                self.tasks2.remove(self.interaction_mesh_task)
+
+        self.interaction_mesh_task = InteractionMeshTask(
+            target_laplacian=self.target_laplacian,
+            adj_matrix=L,
+            frame_names=frame_names,
+            fixed_points=fixed_points,
+            cost=10.0,
+        )
+        # NOTE: interaction mesh task is added to tasks2
+        self.tasks2.append(self.interaction_mesh_task)
+
     def update_targets(self, human_data, offset_to_ground=False):
         # If using segment-length-based scaling, compute and update scale table on first call
         if self.use_segment_length_scaling and not self.segment_lengths_computed:
@@ -510,6 +640,27 @@ class GeneralMotionRetargeting:
     def retarget(self, human_data, offset_to_ground=False):
         # Update the task targets
         self.update_targets(human_data, offset_to_ground)
+
+        # Update interaction mesh
+        if self.use_interaction_mesh:
+            # NOTE: use scaled human points
+            human_mapped_joints_in_object = []
+            for robot_link_name, entry in self.ik_match_table2.items():
+                human_joint_name = entry[0]
+                if human_joint_name in self.scaled_human_data:
+                    human_mapped_joints_in_object.append(self.scaled_human_data[human_joint_name][0])
+            human_mapped_joints_in_object = np.array(human_mapped_joints_in_object)
+
+            # HACK: only implement interaction mesh with ground for now
+            ground_pts = []
+            x_range = np.linspace(-2, 2, 10)
+            y_range = np.linspace(-2, 2, 10)
+            for x in x_range:
+                for y in y_range:
+                    ground_pts.append(np.array([x, y, 0.0]))
+            object_points_local_demo = np.array(ground_pts)
+
+            self.update_interaction_mesh(human_mapped_joints_in_object, object_points_local_demo)
 
         # Initialize root pose to target pose for better IK convergence
         # This is especially important when the initial pose is far from the target

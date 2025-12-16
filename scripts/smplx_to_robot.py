@@ -74,6 +74,13 @@ if __name__ == "__main__":
         help="Fix the foot sliding.",
     )
 
+    parser.add_argument(
+        "--interaction_mesh",
+        default=False,
+        action="store_true",
+        help="Consider interaction mesh task.",
+    )
+
     args = parser.parse_args()
 
 
@@ -123,6 +130,7 @@ if __name__ == "__main__":
         actual_human_height=actual_human_height,
         src_human="smplx",
         tgt_robot=args.robot,
+        use_interaction_mesh=args.interaction_mesh,
     )
     
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,

@@ -2,7 +2,105 @@ import mujoco
 import numpy as np
 import mink
 from mink.limits.limit import Limit, Constraint
+from mink.configuration import Configuration
+from mink.tasks.task import Task
+
 import matplotlib.pyplot as plt
+
+
+class InteractionMeshTask(Task):
+    def __init__(
+        self,
+        target_laplacian: np.ndarray,
+        adj_matrix: np.ndarray,
+        frame_names: list[str],
+        fixed_points: list[np.ndarray] | None = None,
+        cost: np.ndarray | float = 1.0,
+        gain: float = 1.0,
+        lm_damping: float = 2.0,
+        frame_type: str = "body",
+    ):
+        """
+        Args:
+            target_laplacian: (V, 3) target laplacian coordinates delta_target
+            adj_matrix: (V, V) adjacency matrix or precomputed laplacian matrix L
+            frame_names: list of frame names corresponding to the first N vertices of the robot
+            fixed_points: list of fixed points coordinates for the last M vertices
+            cost: task weight
+            gain: task gain (0~1)
+            lm_damping: damping coefficient
+            frame_type: Frame type ("body", "site", "geom")
+        """
+        self.frame_names = frame_names
+        self.fixed_points = fixed_points if fixed_points is not None else []
+        self.num_dynamic = len(frame_names)
+        self.num_fixed = len(self.fixed_points)
+        self.V = self.num_dynamic + self.num_fixed
+        self.frame_type = frame_type
+
+        # precompute laplacian matrix L
+        if np.allclose(np.sum(adj_matrix, axis=1), 0):
+            self.L = adj_matrix
+        else:
+            degree = np.sum(adj_matrix, axis=1)
+            D = np.diag(degree)
+            self.L = D - adj_matrix
+
+        # build Kronecker product form of L_kron (3V, 3V)
+        self.L_kron = np.kron(self.L, np.eye(3))
+
+        # store target and flatten it to (3V,)
+        self.target_lap_vec = target_laplacian.reshape(-1)
+
+        if isinstance(cost, float):
+            cost_vec = np.ones(3 * self.V) * cost
+        else:
+            cost_vec = cost
+
+        super().__init__(cost=cost_vec, gain=gain, lm_damping=lm_damping)
+
+    def set_laplacian_target(self, target_laplacian: np.ndarray):
+        self.target_lap_vec = target_laplacian.reshape(-1)
+
+    def compute_error(self, configuration: Configuration) -> np.ndarray:
+        curr_pts = [] # (keypts, 3)
+
+        # Dynamic points from frames
+        for frame in self.frame_names:
+            transform = configuration.get_transform_frame_to_world(frame, self.frame_type)
+            curr_pts.append(transform.translation())
+
+        # Fixed points
+        for pt in self.fixed_points:
+            curr_pts.append(pt)
+
+        curr_pts_flat = np.hstack(curr_pts) # (3V, )
+        curr_lap_vec = self.L_kron @ curr_pts_flat
+
+        return curr_lap_vec - self.target_lap_vec
+
+    def compute_jacobian(self, configuration: Configuration) -> np.ndarray:
+        J_list = []
+        for name in self.frame_names:
+            J_body = configuration.get_frame_jacobian(name, self.frame_type)
+            transform = configuration.get_transform_frame_to_world(name, self.frame_type)
+            R_wf = transform.rotation().as_matrix()
+            J_linear_body = J_body[:3, :]
+            J_linear_world = R_wf @ J_linear_body
+            J_list.append(J_linear_world)
+
+        # Fixed points have zero Jacobian
+        if self.num_fixed > 0:
+            nv = configuration.model.nv
+            J_fixed = np.zeros((3 * self.num_fixed, nv))
+            J_list.append(J_fixed)
+
+        J_stacked = np.vstack(J_list) # (3V, nv)
+
+        # Chain rule: J_task = d(Lp)/dq = L * dp/dq = L * J_stacked
+        J_task = self.L_kron @ J_stacked # (3V, 3V) @ (3V, nv) -> (3V, nv)
+
+        return J_task
 
 
 class FootStickLimit(Limit):
