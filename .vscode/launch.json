@@ -157,5 +157,19 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
+        // python scripts/batch_gmr_pkl_to_csv.py --input_folder retargeted_data/ground_29dof --output_folder retargeted_data/ground_29dof_csv
+        {
+            "name": "batch_gmr_pkl_to_csv.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/batch_gmr_pkl_to_csv.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--input_folder", "retargeted_data/ground_29dof",
+                "--output_folder", "retargeted_data/ground_29dof_csv",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
     ]
 }

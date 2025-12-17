@@ -108,8 +108,8 @@ def merge_pkl_files(input_dir, output_file):
 
 def main():
 
-    default_input = "retargeted_data/ground"
-    default_output = "merged_motions/ground.pkl"
+    default_input = "retargeted_data/ground_29dof"
+    default_output = "merged_motions/ground_29dof.pkl"
     
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='合并 pkl 文件到一个文件中')
