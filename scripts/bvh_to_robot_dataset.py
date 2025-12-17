@@ -19,7 +19,50 @@ import gc
 import time
 import psutil
 import tracemalloc
-G1_ROTATION_AXIS = torch.tensor([[
+G1_ROTATION_AXIS_29dof = torch.tensor([[
+    [0, 1, 0], # l_hip_pitch 
+    [1, 0, 0], # l_hip_roll
+    [0, 0, 1], # l_hip_yaw
+    
+    [0, 1, 0], # l_knee
+    [0, 1, 0], # l_ankle_pitch
+    [1, 0, 0], # l_ankle_roll
+    
+    [0, 1, 0], # r_hip_pitch
+    [1, 0, 0], # r_hip_roll
+    [0, 0, 1], # r_hip_yaw
+    
+    [0, 1, 0], # r_knee
+    [0, 1, 0], # r_ankle_pitch
+    [1, 0, 0], # r_ankle_roll
+    
+    [0, 0, 1], # waist_yaw_joint
+    [1, 0, 0], # waist_roll_joint
+    [0, 1, 0], # waist_pitch_joint
+   
+    [0, 1, 0], # l_shoulder_pitch
+    [1, 0, 0], # l_shoulder_roll
+    [0, 0, 1], # l_shoulder_yaw
+    
+    [0, 1, 0], # l_elbow
+
+    [1, 0, 0], # l_wrist_roll
+    [0, 1, 0], # l_wrist_pitch
+    [0, 0, 1], # l_wrist_yaw
+
+    
+    [0, 1, 0], # r_shoulder_pitch
+    [1, 0, 0], # r_shoulder_roll
+    [0, 0, 1], # r_shoulder_yaw
+    
+    [0, 1, 0], # r_elbow
+
+    [1, 0, 0], # r_wrist_roll
+    [0, 1, 0], # r_wrist_pitch
+    [0, 0, 1], # r_wrist_yaw
+    ]])
+
+G1_ROTATION_AXIS_23dof = torch.tensor([[
     [0, 1, 0], # l_hip_pitch 
     [1, 0, 0], # l_hip_roll
     [0, 0, 1], # l_hip_yaw
@@ -66,7 +109,7 @@ def check_memory(threshold_gb):
     return False
 
 
-def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, total_files, memory_threshold, verbose=False, save_auto_check_format=False):
+def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, total_files, memory_threshold, verbose=False, save_format="ams_23dof", save_auto_check_format=False):
     """处理单个 BVH 文件并保存"""
     def log_memory(message):
         if verbose:
@@ -158,46 +201,71 @@ def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, to
             for i in range(root_pos.shape[0]):
                 lowest_body_part = torch.min(body_pos[i, :, 2])
                 root_pos[i, 2] = root_pos[i, 2] - lowest_body_part + ground_offset
+    ROOT_ORIGIN_OFFSET = True
+    if ROOT_ORIGIN_OFFSET:
+        # offset using the first frame
+        root_pos[:, :2] -= root_pos[0, :2]      
+    if save_format == "ams_23dof" or save_format == "ams_29dof":
+        # Convert rotation to axis-angle
+        rot_vec_all = []
+        for frame_idx in range(num_frames):
+            rotation = R.from_quat(root_rot[frame_idx])
+            rotvec = rotation.as_rotvec()
+            rotvec = torch.from_numpy(rotvec)
+            rot_vec_all.append(rotvec)
+        
+        device = "cpu"
+        rot_vec_all = torch.cat(rot_vec_all, dim=0).view(-1, 3).to(device=device, dtype=torch.float)
+        dof_pos_all = torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
+        if save_format == "ams_23dof":
+            G1_ROTATION_AXIS = G1_ROTATION_AXIS_23dof
+        elif save_format == "ams_29dof":
+            G1_ROTATION_AXIS = G1_ROTATION_AXIS_29dof
+        pose_aa = torch.cat([rot_vec_all[None, :, None], G1_ROTATION_AXIS * dof_pos_all[None,:,:,None], torch.zeros((1, num_frames, 3, 3), device=device)], axis=2)
+        
+        # Remove the first frame
+        root_pos = root_pos[1:]
+        root_rot = root_rot[1:]
+        dof_pos = dof_pos[1:]
+        pose_aa = pose_aa[:, 1:]
+        local_body_pos = local_body_pos[1:]
+        num_frames = num_frames - 1
     
-    # Convert rotation to axis-angle
-    rot_vec_all = []
-    for frame_idx in range(num_frames):
-        rotation = R.from_quat(root_rot[frame_idx])
-        rotvec = rotation.as_rotvec()
-        rotvec = torch.from_numpy(rotvec)
-        rot_vec_all.append(rotvec)
-    
-    device = "cpu"
-    rot_vec_all = torch.cat(rot_vec_all, dim=0).view(-1, 3).to(device=device, dtype=torch.float)
-    dof_pos_all = torch.from_numpy(dof_pos).to(device=device, dtype=torch.float)
-    pose_aa = torch.cat([rot_vec_all[None, :, None], G1_ROTATION_AXIS * dof_pos_all[None,:,:,None], torch.zeros((1, num_frames, 3, 3), device=device)], axis=2)
-    
-    # Remove the first frame
-    root_pos = root_pos[1:]
-    root_rot = root_rot[1:]
-    dof_pos = dof_pos[1:]
-    pose_aa = pose_aa[:, 1:]
-    num_frames = num_frames - 1
-    
-    if save_auto_check_format:
+        if save_auto_check_format:
+            motion_data = {
+                "root_trans_offset": root_pos,
+                "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+                "dof": dof_pos,
+                "root_rot": root_rot,
+                "fps": 30,
+                "root_pos": root_pos,
+                "dof_pos": dof_pos,
+                "local_body_pos": local_body_pos.detach().cpu().numpy(),
+                "link_body_list": body_names,
+            }
+        else:
+            motion_data = {
+                "root_trans_offset": root_pos,
+                "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
+                "dof": dof_pos,
+                "root_rot": root_rot,
+                "fps": 30,
+            }
+
+    elif save_format == "gmr":
+        # Remove the first frame
+        root_pos = root_pos[1:]
+        root_rot = root_rot[1:]
+        dof_pos = dof_pos[1:]
+        local_body_pos = local_body_pos[1:]
+        num_frames = num_frames - 1
         motion_data = {
-            "root_trans_offset": root_pos,
-            "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
-            "dof": dof_pos,
-            "root_rot": root_rot,
-            "fps": 30,
             "root_pos": root_pos,
+            "root_rot": root_rot,
             "dof_pos": dof_pos,
             "local_body_pos": local_body_pos.detach().cpu().numpy(),
+            "fps": src_fps,
             "link_body_list": body_names,
-        }
-    else:
-        motion_data = {
-            "root_trans_offset": root_pos,
-            "pose_aa": pose_aa.squeeze().cpu().detach().numpy(),
-            "dof": dof_pos,
-            "root_rot": root_rot,
-            "fps": 30,
         }
     
 
@@ -250,6 +318,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--robot",
         default="unitree_g1_fixed_wrist",
+        type=str,
+        choices=["unitree_g1", "unitree_g1_fixed_wrist"],
     )
     
     parser.add_argument(
@@ -277,6 +347,13 @@ if __name__ == "__main__":
         default=10,
         type=float,
         help="Memory threshold in GB for pausing processing (default: 10)"
+    )
+
+    parser.add_argument(
+        "--save_format",
+        default="ams_23dof",
+        choices=["ams_23dof", "ams_29dof", "gmr"],
+        type=str,
     )
 
     parser.add_argument(
@@ -317,6 +394,6 @@ if __name__ == "__main__":
     # Process files in parallel
     # Each process will save its own file and print progress
     with mp.Pool(args.num_cpus) as pool:
-        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose, args.save_auto_check_format) for args_i in args_list])
+        pool.starmap(process_file, [args_i + (total_files, args.memory_threshold, verbose, args.save_format, args.save_auto_check_format) for args_i in args_list])
 
     print(f"Done. Saved to {tgt_folder}")
