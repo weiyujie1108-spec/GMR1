@@ -1,5 +1,4 @@
-# python scripts/bvh_to_robot_dataset.py --src_folder data/lafan --tgt_folder retargeted_data/lafan/ --robot unitree_g1_fixed_wrist --num_cpus 20 --memory_threshold 30
-# python scripts/bvh_to_robot_dataset.py --src_folder data/mocap_1127 --tgt_folder retargeted_data/mocap_1127/ --robot unitree_g1_fixed_wrist --num_cpus 20 --memory_threshold 30
+# python scripts/bvh_to_robot_dataset.py --src_folder data/mocap_1127 --tgt_folder retargeted_data/mocap_1127/ --robot unitree_g1_fixed_wrist --num_cpus 20 --memory_threshold 30 --save_auto_check_format
 import argparse
 import pathlib
 import os
@@ -106,7 +105,6 @@ def process_file(bvh_file_path, tgt_file_path, robot, src_folder, tgt_folder, to
             src_human="bvh_nokov",
             tgt_robot=robot,
             actual_human_height=actual_human_height,
-            use_segment_length_scaling=True,
         )
         model = mj.MjModel.from_xml_path(retarget.xml_file)
         data = mj.MjData(model)

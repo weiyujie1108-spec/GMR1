@@ -20,7 +20,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
-        // python scripts/smplx_to_robot_dataset.py --src_folder data/AMASS --tgt_folder retargeted_data/AMASS --num_cpus 2 --robot unitree_g1_fixed_wrist --memory_threshold 10
+        // python scripts/smplx_to_robot_dataset.py --src_folder data/AMASS --tgt_folder retargeted_data/AMASS --num_cpus 2 --robot unitree_g1_fixed_wrist --memory_threshold 10 
         {
             "name": "smplx_to_robot_dataset.py",
             "type": "debugpy",
@@ -30,10 +30,13 @@
             "args": [
                 // "--src_folder", "data/AMASS/ACCAD/Male1Running_c3d",
                 // "--tgt_folder", "retargeted_data/AMASS/ACCAD/Male1Running_c3d",
-                "--src_folder", "data/AMASS",
-                "--tgt_folder", "retargeted_data/AMASS",
+                "--src_folder", "data/jitter_example",
+                "--tgt_folder", "retargeted_data/jitter_example",
                 // "--robot", "unitree_g1",
                 "--robot", "unitree_g1_fixed_wrist",
+                "--num_cpus", "1",
+                "--memory_threshold", "6",
+                "--save_auto_check_format",
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
@@ -60,6 +63,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
+        // python scripts/bvh_to_robot_dataset.py --src_folder data/mocap_1127 --tgt_folder retargeted_data/mocap_1127/ --robot unitree_g1_fixed_wrist --num_cpus 20 --memory_threshold 30
         {
             "name": "bvh_to_robot_dataset.py",
             "type": "debugpy",
@@ -67,11 +71,13 @@
             "program": "${workspaceFolder}/scripts/bvh_to_robot_dataset.py",
             "cwd": "${workspaceFolder}",
             "args": [
-                "--src_folder", "data/mocap_record",
-                "--tgt_folder", "retargeted_data/mocap_record",
+                "--src_folder", "data/ground",
+                "--tgt_folder", "retargeted_data/ground",
                 // "--robot", "unitree_g1",
                 "--robot", "unitree_g1_fixed_wrist",
-                "--output_name", "mocap_record_all_motions.pkl",
+                "--num_cpus", "1",
+                "--memory_threshold", "6",
+                "--save_auto_check_format",
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
@@ -118,6 +124,35 @@
                 "--server", "192.168.3.9",
                 "--port", "8081",
             ],
+        },
+        //python scripts/auto_check.py --motion_folder retargeted_data/ground  --robot_type unitree_g1_fixed_wrist
+        {
+            "name": "auto_check.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/auto_check.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--motion_folder", "retargeted_data/mocap_all_12_11",
+                "--robot_type", "unitree_g1_fixed_wrist",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
+        // python scripts/robot_motion_labeler.py   --robot unitree_g1_fixed_wrist   --robot_motion_folder retargeted_data/test_smplx   --annotation_file auto_check_annotations.json
+        {
+            "name": "robot_motion_labeler.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/robot_motion_labeler.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--robot", "unitree_g1_fixed_wrist",
+                "--robot_motion_folder", "retargeted_data/mocap_all_12_11",
+                "--annotation_file", "auto_check_annotations.json",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
         },
     ]
 }
